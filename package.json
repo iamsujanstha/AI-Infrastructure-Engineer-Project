@@ -12,6 +12,7 @@
     "lint": "eslint .",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "vitest run",
+    "test:integration": "RUN_DATABASE_INTEGRATION=1 vitest run apps/api/src/database/database.integration.spec.ts",
     "test:watch": "vitest"
   },
   "devDependencies": {

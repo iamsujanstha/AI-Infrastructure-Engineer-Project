@@ -9,7 +9,7 @@ The platform needs durable users, projects, conversations, messages, agent runs,
 
 ## Decision
 
-Use PostgreSQL as the authoritative durable store and raw `pg` for connection pooling and parameterized SQL. The local foundation uses PostgreSQL 17 with pgvector available; Phase 1 establishes a checked-in SQL migration ledger and enables the `vector` extension. Domain tables, key strategy, indexes, deletion rules, and application transaction boundaries remain Phase 2 design work.
+Use PostgreSQL as the authoritative durable store and raw `pg` for connection pooling and parameterized SQL. The local foundation uses PostgreSQL 17 with pgvector available. Phase 1 established the SQL migration ledger and enabled the `vector` extension; Phase 2 added core tables, constraints, and indexes. Detailed access patterns and application transaction boundaries still need to be implemented by their owning services.
 
 ## Alternatives considered
 

@@ -49,7 +49,7 @@ Memory is not a transcript archive. Retrieval is not guaranteed to be relevant. 
 
 The modular monolith is the starting boundary because the product is early and its data and workflows are closely coupled. Service extraction would add network failure and operational cost before a scaling or team boundary is established. PostgreSQL, raw `pg`, Redis, and the pgvector extension are accepted foundation choices with their current scope and limitations recorded in ADRs. Queue semantics, streaming transport, Hermes, and MLX still require later decisions against verified requirements and failure behavior.
 
-Open design work includes identity model, tenant/project isolation, context token accounting accuracy, memory provenance and retention, provider cancellation semantics, queue idempotency, and deployment network topology. Do not present these as settled decisions until their ADRs and implementation evidence exist.
+Open design work includes authentication and authorization policy over the owner/project scopes, context token accounting accuracy, memory provenance and retention, provider cancellation semantics, queue idempotency, and deployment network topology. Do not present these as settled decisions until their ADRs and implementation evidence exist.
 
 ## Failure posture
 

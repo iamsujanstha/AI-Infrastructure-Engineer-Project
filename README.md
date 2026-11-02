@@ -14,7 +14,7 @@ Logical knowledge may grow over time. Each individual inference request must rem
 
 ## Current status
 
-Phase 0 established the engineering contract. Phase 1 provides the initial runnable web/API foundation, PostgreSQL/Redis dependencies, and a checked-in SQL migration runner built on `pg`. Verify current commands and results in [local development](docs/infrastructure/local-development.md); roadmap capabilities are not implemented unless explicitly listed there.
+Phases 0–1 established the engineering contract and runnable web/API foundation. Phase 2 adds the PostgreSQL core schema, scope-safe relational constraints, query indexes, pgvector storage, and a checked-in SQL migration runner using raw `pg`. Application repositories and domain workflows are still future work. See [local development](docs/infrastructure/local-development.md) and the [database model](docs/database/data-model.md).
 
 ## Architecture direction
 

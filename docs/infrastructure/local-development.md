@@ -27,7 +27,7 @@ Apply committed migrations to the configured database with:
 npm run db:migrate -w @local-ai/api
 ```
 
-The Phase 1 baseline enables the PostgreSQL `vector` extension; Phase 2 owns domain tables and indexes. The runner applies checked-in SQL files in order, one transaction per migration, while holding a PostgreSQL advisory lock. It records SHA-256 checksums and rejects changed or missing applied migrations. It does not generate migrations or support nontransactional DDL such as `CREATE INDEX CONCURRENTLY` yet.
+Migration `0001` enables the PostgreSQL `vector` extension. Migrations `0002` and `0003` create the core data model and refine active-scope uniqueness. The runner applies checked-in SQL files in order, one transaction per migration, while holding a PostgreSQL advisory lock. It records SHA-256 checksums and rejects changed or missing applied migrations. It does not generate migrations or support nontransactional DDL such as `CREATE INDEX CONCURRENTLY` yet.
 
 The Compose services have health checks, but the host-run API is not gated on them. Start dependencies first, or use `/health/database` and `/health/redis` to confirm readiness. The API process remains live while dependencies are unavailable, which helps distinguish process health from readiness.
 
@@ -50,6 +50,7 @@ The Next.js control surface displays these checks. Its API base is compiled from
 npm run lint
 npm run typecheck
 npm test
+npm run test:integration
 npm run build
 docker compose ps
 docker compose logs postgres redis
@@ -57,6 +58,8 @@ docker compose down
 ```
 
 `docker compose down` preserves named database volumes. To remove local database data as well, `docker compose down -v` is destructive and should only be used when that data is disposable.
+
+`npm run test:integration` requires the local database to be running and migrations applied. It wraps its fixture writes in a transaction and rolls them back.
 
 ## Configuration and security limits
 

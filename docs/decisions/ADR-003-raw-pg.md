@@ -5,7 +5,7 @@
 
 ## Context
 
-The platform's highest-value learning areas include SQL, data modeling, transactions, connection pooling, and query plans. PostgreSQL-specific features, especially pgvector, are central. The system has no domain schema yet, so persistence can be changed without rewriting application repositories.
+The platform's highest-value learning areas include SQL, data modeling, transactions, connection pooling, and query plans. PostgreSQL-specific features, especially pgvector, are central. At the time of this decision, the core domain schema had not been added, so persistence could be changed without rewriting application repositories. Phase 2 now defines that schema in SQL migrations.
 
 ## Decision
 
