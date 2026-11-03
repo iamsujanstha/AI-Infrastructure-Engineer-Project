@@ -26,25 +26,23 @@ try {
 }
 ```
 
-This is a transaction pattern, not an implemented conversation service. Production helpers should preserve the original error if rollback also fails and destroy the bad connection as shown.
+`PostgresService.withTransaction` implements this checked-out-client pattern and releases a connection as broken if rollback itself fails. Conversation/message repositories use it for multi-row workflows.
 
 ## Message append and concurrent writers
 
-Allocate sequence and advance the optimistic version in the same transaction as inserting the message:
+`MessageRepository.startTurn` locks the conversation by updating its sequence counter and allocates two adjacent sequence numbers in the same transaction as inserting the user message, text part, and streaming assistant placeholder. The conversation row update serializes writers for that conversation. It rejects a new turn while an assistant message is still streaming. The schema's unique `(conversation_id, sequence)` constraint remains the final duplicate-sequence guard.
 
 ```sql
 UPDATE conversations
-SET next_message_sequence = next_message_sequence + 1,
+SET next_message_sequence = next_message_sequence + 2,
     version = version + 1,
-    last_message_at = clock_timestamp()
-WHERE id = $1
-  AND owner_user_id = $2
-  AND deleted_at IS NULL
-  AND version = $3
-RETURNING next_message_sequence - 1 AS allocated_sequence, version;
+    last_message_at = clock_timestamp(),
+    updated_at = clock_timestamp()
+WHERE id = $1 AND owner_user_id = $2 AND deleted_at IS NULL AND status = 'active'
+RETURNING next_message_sequence - 2 AS first_allocated_sequence;
 ```
 
-No returned row means the conversation is missing, deleted, unauthorized for the supplied owner, or the caller's version is stale; the application should distinguish these cases without leaking cross-owner existence. The row update serializes sequence allocation for one conversation. Insert the message and its parts before commit; a failure rolls back the counter and prevents a visible gap.
+No returned row means the conversation is missing, deleted, or not available for the supplied owner. Insert the user message, its text part, and assistant placeholder before commit; a failure rolls back the counter and prevents a visible gap. Retry/regeneration serializes attempt allocation by locking the source user message. Branching locks the source conversation and copies the selected history and parts transactionally; it rejects a fork point with unfinished assistant output.
 
 Unique constraints still protect against duplicate `(conversation_id, sequence)` values. They are the final correctness boundary if two code paths implement allocation incorrectly.
 

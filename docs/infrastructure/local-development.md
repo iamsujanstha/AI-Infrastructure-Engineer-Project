@@ -10,6 +10,8 @@ Verification ran with Node.js 26.8.1, npm 11.19.0, and Docker 29.4.1 on macOS. M
 
 ## Start
 
+For the active context-platform Phase 1 setup, use [context-engine foundation](context-engine-foundation.md). It starts PostgreSQL and FastAPI; Redis is optional under the legacy Compose profile. The commands below retain the earlier web/conversation development setup.
+
 From the repository root:
 
 ```sh
@@ -19,7 +21,7 @@ docker compose up -d postgres redis
 npm run dev
 ```
 
-The web app is available at `http://localhost:3000`; the API is at `http://localhost:4000`. The root `.env` contains local-only sample credentials and is ignored by Git. Replace them for any non-local environment. `ConfigModule` loads the workspace `.env` and the root `.env`; shell environment variables take precedence.
+The web app is available at `http://127.0.0.1:3000`; the API is at `http://127.0.0.1:4000`. The API allows both `127.0.0.1:3000` and `localhost:3000` as local browser origins. Use one hostname consistently when opening the app because browsers treat those origins as distinct. The root `.env` contains local-only sample credentials and is ignored by Git. Replace them for any non-local environment. `ConfigModule` loads the workspace `.env` and the root `.env`; shell environment variables take precedence.
 
 Apply committed migrations to the configured database with:
 
@@ -27,7 +29,7 @@ Apply committed migrations to the configured database with:
 npm run db:migrate -w @local-ai/api
 ```
 
-Migration `0001` enables the PostgreSQL `vector` extension. Migrations `0002` and `0003` create the core data model and refine active-scope uniqueness. The runner applies checked-in SQL files in order, one transaction per migration, while holding a PostgreSQL advisory lock. It records SHA-256 checksums and rejects changed or missing applied migrations. It does not generate migrations or support nontransactional DDL such as `CREATE INDEX CONCURRENTLY` yet.
+Migration `0001` enables the PostgreSQL `vector` extension. Migrations `0002` and `0003` create the core data model and refine active-scope uniqueness. Migration `0004` adds conversation reply and generation-attempt lineage; `0005` enforces one streaming assistant response per conversation. The runner applies checked-in SQL files in order, one transaction per migration, while holding a PostgreSQL advisory lock. It records SHA-256 checksums and rejects changed or missing applied migrations. It does not generate migrations or support nontransactional DDL such as `CREATE INDEX CONCURRENTLY` yet.
 
 The Compose services have health checks, but the host-run API is not gated on them. Start dependencies first, or use `/health/database` and `/health/redis` to confirm readiness. The API process remains live while dependencies are unavailable, which helps distinguish process health from readiness.
 

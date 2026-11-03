@@ -4,7 +4,7 @@
 
 PostgreSQL is the durable source of truth. Tables preserve ownership and relationships with foreign keys, `CHECK` constraints, and unique indexes so application bugs do not silently create cross-user references or invalid states. Conversation history, curated memory, retrieved candidates, and an individual inference context are separate records with separate lifecycles.
 
-The schema is established by numbered SQL migrations in `apps/api/migrations/`. The Phase 2 migration creates the core model; it does not claim that conversation, memory, agent, or inference workflows are implemented yet.
+The schema is established by numbered SQL migrations in `apps/api/migrations/`. Phase 2 creates the core relational model. Phase 3 implements conversation/message persistence and selected message lifecycle operations; memory, context, agent orchestration, and inference workflows are still future work.
 
 ## Relationship map
 
@@ -41,7 +41,7 @@ erDiagram
 | `users` | Owner identity placeholder, status, timestamps, soft deletion. Email uniqueness is case-insensitive among active rows. Authentication credentials are deliberately not part of this phase. |
 | `projects` | User-owned knowledge scope, with per-owner slug uniqueness and JSON settings. |
 | `conversations` | Owner/project scope, archive state, optimistic `version`, message sequence allocator, and optional branch origin. A composite foreign key prevents assigning another user's project. |
-| `messages` | Ordered immutable message records with role and streaming/final state. Unique `(conversation_id, sequence)` enforces one message per position. Content is stored in ordered `message_parts`. |
+| `messages` | Ordered durable records with role, streaming/final state, and assistant reply/generation lineage. Unique `(conversation_id, sequence)` enforces one message per position; a partial unique index permits only one streaming assistant message per conversation. Content is stored in ordered `message_parts` and can be appended while streaming. |
 | `message_parts` | Text, reasoning, tool call/result, image reference, or metadata fragment. JSON stores structured tool data; binary assets live outside PostgreSQL and are referenced by storage key. |
 | `agent_runs` | One orchestration attempt, its source/response messages, model selection, retry relation, status, and lifecycle timestamps. |
 | `tool_calls` | Ordered call arguments/result and status within an agent run. `provider_call_id` is unique within the run when present. Tool authorization remains an application concern. |

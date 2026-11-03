@@ -58,6 +58,7 @@ async function bootstrap(): Promise<void> {
       { path: 'health/database', method: RequestMethod.GET },
       { path: 'health/redis', method: RequestMethod.GET },
       { path: 'health/inference', method: RequestMethod.GET },
+      { path: 'health/context-engine', method: RequestMethod.GET },
     ],
   });
   app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });

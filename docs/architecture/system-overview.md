@@ -1,5 +1,7 @@
 # System Overview
 
+Historical architecture from the earlier conversation/laboratory brief. The active product architecture and implementation order are in [AI Project Context Platform](system.md). Existing runtime descriptions remain historical evidence; the diagrams below are not the current V1 target.
+
 ## Purpose
 
 This project is a private AI infrastructure and memory platform. Its primary engineering challenge is to select and manage the context supplied to an agent, not to replay an ever-growing transcript to a model. The control surface should make orchestration, context choices, costs, and failures inspectable.

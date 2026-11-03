@@ -1,16 +1,19 @@
-import { Controller, Get, HttpStatus, Res, VERSION_NEUTRAL } from '@nestjs/common';
+import { Controller, Get, HttpStatus, Inject, Req, Res, VERSION_NEUTRAL } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import type { AppEnvironment } from '../config/environment';
 import { PostgresService } from '../database/postgres.service';
 import { RedisService } from '../redis/redis.service';
 
+import { ContextEngineClient, ContextEngineRequestError } from '../context-engine/context-engine.client';
+
 @Controller({ path: 'health', version: VERSION_NEUTRAL })
 export class HealthController {
   constructor(
-    private readonly database: PostgresService,
-    private readonly redis: RedisService,
-    private readonly config: ConfigService<AppEnvironment, true>,
+    @Inject(PostgresService) private readonly database: PostgresService,
+    @Inject(RedisService) private readonly redis: RedisService,
+    @Inject(ContextEngineClient) private readonly engine: ContextEngineClient,
+    @Inject(ConfigService) private readonly config: ConfigService<AppEnvironment, true>,
   ) {}
 
   @Get()
@@ -58,4 +61,17 @@ export class HealthController {
       return { statusCode: HttpStatus.SERVICE_UNAVAILABLE, status: 'unavailable', dependency: 'inference' };
     }
   }
+  @Get('context-engine')
+  async engineReadiness(@Req() request: Request, @Res({ passthrough: true }) response: Response): Promise<Record<string, string | number>> {
+    try {
+      await this.engine.checkHealth(request);
+      return { status: 'ok', dependency: 'context-engine' };
+    } catch (error) {
+      const timedOut = error instanceof ContextEngineRequestError && error.timedOut;
+      const statusCode = timedOut ? 504 : 503;
+      response.status(statusCode);
+      return { statusCode, status: timedOut ? 'timeout' : 'unavailable', dependency: 'context-engine' };
+    }
+  }
+
 }

@@ -2,7 +2,27 @@
 
 ## Mission
 
-Build a private, production-minded AI infrastructure and memory platform as a learning system. The control surface is a means to inspect and operate the backend; it is not the product's architectural center. Teach through explicit boundaries, documented decisions, operational evidence, and honest limitations.
+Build the AI Project Context Platform described in the 2026-11-03 brief. V1 extracts, structures, secures, retrieves and compiles project context for existing applications, with Atlas Commerce as the first real integration. Teach through explicit boundaries, documented decisions, operational evidence, and honest limitations.
+
+## Active implementation scope
+
+- The active architecture and phase sequence are in docs/architecture/system.md. Earlier conversation and laboratory phases are historical; do not continue their roadmap implicitly.
+- NestJS owns authentication, tenancy, authorization, public APIs, integration, audit and orchestration. FastAPI owns context computation and enforces Nest-authorized scopes without duplicating business permission policy.
+- Keep raw pg and the existing migration history. Add project-context storage through reviewed additive migrations; preserve existing data and runtime work.
+- Project files are untrusted data. Never execute repository scripts/configuration or request production database credentials for scanning. Exclude/sanitize secrets before storage, chunking, embeddings, logs and responses.
+- Every retrieval requires tenant/project/user/environment/permission scope; filter unauthorized data before candidate selection and graph expansion.
+- V1 is project context only. Hermes, MLX, Qwen, business-data tools, conversation work and new UI features are deferred. Redis is optional until justified.
+- Start with the new Phase 0 architecture, then follow the brief's scanner/analyzers/graph/storage/retrieval/compiler/evaluation/Atlas order. Stop after each completed phase for review.
+
+## Product direction
+
+- Build secure reusable project-context infrastructure; the engineering laboratory remains a learning method, not the V1 product scope.
+- Treat the UI as the last layer: implement and measure the backend capability, define its data/API contracts, test success and failure behavior, then expose it in the UI.
+- Every displayed health state or metric must come from a real backend source. Use `UNKNOWN` when no authoritative measurement exists; never invent status, tokens, latency, model, queue, or memory values.
+- Every major subsystem needs a documented and repeatable failure experiment with recovery verification. Use isolated local/test infrastructure and explicit safety bounds for destructive failure injection.
+- Add information-architecture destinations only when a real capability can populate and operate them. Avoid empty labs, mock charts, decorative KPIs, and production-looking placeholders.
+- Keep the existing web view a compact diagnostic surface. Revisit UI navigation only after real project-context APIs and CLI workflows exist.
+- Before marking a feature complete, explain the problem, internal behavior, failure/recovery, load/bottleneck, alternatives/tradeoffs, scale pressure, and an interview-level question in the relevant docs or journal.
 
 ## Architecture principles
 

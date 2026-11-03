@@ -17,7 +17,22 @@ services:
       start_period: 5s
     restart: unless-stopped
 
+  context-engine:
+    build: ./apps/context-engine
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      CONTEXT_ENGINE_TOKEN: ${CONTEXT_ENGINE_TOKEN:-context-engine-local-dev-token-change-before-use-32}
+    ports:
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
   redis:
+    profiles: [legacy]
     image: redis:7-alpine
     command: ["redis-server", "--appendonly", "yes"]
     ports:

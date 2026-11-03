@@ -11,6 +11,11 @@ describe('parseEnvironment', () => {
     expect(environment.PG_POOL_MAX).toBe(10);
   });
 
+  it('allows the documented IPv4 loopback web origin by default', () => {
+    const environment = parseEnvironment({});
+    expect(environment.CORS_ORIGINS).toContain('http://127.0.0.1:3000');
+  });
+
   it('rejects unsafe development credentials in production', () => {
     expect(() => parseEnvironment({ NODE_ENV: 'production' })).toThrow(/development credentials/);
   });

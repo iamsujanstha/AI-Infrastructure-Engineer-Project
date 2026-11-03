@@ -12,5 +12,6 @@ import { parseEnvironment } from './environment';
       validate: parseEnvironment,
     }),
   ],
+  exports: [ConfigModule],
 })
 export class ConfigurationModule {}

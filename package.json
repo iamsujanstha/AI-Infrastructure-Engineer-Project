@@ -4,7 +4,8 @@
   "private": true,
   "workspaces": [
     "apps/api",
-    "apps/web"
+    "apps/web",
+    "apps/cli"
   ],
   "scripts": {
     "dev": "concurrently -n api,web -c blue,green \"npm run dev -w @local-ai/api\" \"npm run dev -w @local-ai/web\"",
@@ -12,8 +13,9 @@
     "lint": "eslint .",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "vitest run",
-    "test:integration": "RUN_DATABASE_INTEGRATION=1 vitest run apps/api/src/database/database.integration.spec.ts",
-    "test:watch": "vitest"
+    "test:integration": "RUN_DATABASE_INTEGRATION=1 vitest run apps/api/src/database/database.integration.spec.ts apps/api/src/conversations/conversation.integration.spec.ts",
+    "test:watch": "vitest",
+    "context": "node apps/cli/dist/main.js"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.0",

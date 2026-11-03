@@ -6,7 +6,7 @@ type DependencyName = 'API' | 'PostgreSQL' | 'Redis' | 'Inference';
 type DependencyStatus = 'checking' | 'online' | 'offline' | 'not_configured';
 type Dependency = { name: DependencyName; path: string; status: DependencyStatus; detail: string };
 
-const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:4000';
+const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:4000';
 const initialDependencies: Dependency[] = [
   { name: 'API', path: '/health', status: 'checking', detail: 'Checking process liveness' },
   { name: 'PostgreSQL', path: '/health/database', status: 'checking', detail: 'Checking database readiness' },

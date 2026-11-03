@@ -35,7 +35,7 @@ The lock is nonblocking: a second deploy exits instead of waiting indefinitely b
 
 File names use `NNNN_description.sql` with a unique numeric prefix. The runner sorts names lexically, computes SHA-256 from the exact file bytes, and stores it in `_platform_schema_migrations`. On later runs it fails if an applied file disappears or its checksum changes. This discourages rewriting history; add a new forward migration instead.
 
-Migration `0001` enables the `vector` extension. Migrations `0002` and `0003` establish the relational model and correct scope-sensitive uniqueness. The extension already existed from the earlier baseline, so `CREATE EXTENSION IF NOT EXISTS vector` safely established the new runner's ledger without dropping database state.
+Migration `0001` enables the `vector` extension. Migrations `0002` and `0003` establish the relational model and correct scope-sensitive uniqueness. Migration `0004` adds self-scoped message reply lineage and generation attempt metadata needed by retries and regenerations. Migration `0005` enforces lineage for repeated generations and one active assistant response per conversation. The extension already existed from the earlier baseline, so `CREATE EXTENSION IF NOT EXISTS vector` safely established the new runner's ledger without dropping database state.
 
 ## Transaction and recovery limits
 

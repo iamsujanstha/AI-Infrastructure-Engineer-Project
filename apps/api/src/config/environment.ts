@@ -9,11 +9,14 @@ const environmentSchema = z.object({
   REDIS_URL: z.string().url().default('redis://127.0.0.1:6379'),
   PG_POOL_MAX: z.coerce.number().int().min(1).max(100).default(10),
   PG_CONNECTION_TIMEOUT_MS: z.coerce.number().int().min(100).max(30000).default(2000),
-  CORS_ORIGINS: z.string().default('http://localhost:3000'),
+  CORS_ORIGINS: z.string().default('http://localhost:3000,http://127.0.0.1:3000'),
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().min(1000).max(3600000).default(60000),
   RATE_LIMIT_MAX_REQUESTS: z.coerce.number().int().min(1).max(10000).default(120),
   INFERENCE_HEALTH_URL: z.union([z.string().url(), z.literal('')]).default(''),
   INFERENCE_HEALTH_TIMEOUT_MS: z.coerce.number().int().min(100).max(30000).default(2000),
+  CONTEXT_ENGINE_URL: z.string().url().default('http://127.0.0.1:8000'),
+  CONTEXT_ENGINE_TOKEN: z.string().min(32).default('context-engine-local-dev-token-change-before-use-32'),
+  CONTEXT_ENGINE_TIMEOUT_MS: z.coerce.number().int().min(100).max(30000).default(1500),
 }).superRefine((value, context) => {
   if (!['postgres:', 'postgresql:'].includes(new URL(value.DATABASE_URL).protocol)) {
     context.addIssue({ code: 'custom', path: ['DATABASE_URL'], message: 'must use postgres:// or postgresql://' });
@@ -35,6 +38,9 @@ const environmentSchema = z.object({
   if (value.NODE_ENV === 'production') {
     if (value.DATABASE_URL.includes('platform_dev_only')) {
       context.addIssue({ code: 'custom', path: ['DATABASE_URL'], message: 'development credentials are forbidden in production' });
+    }
+    if (value.CONTEXT_ENGINE_TOKEN.includes('local-dev-token')) {
+      context.addIssue({ code: 'custom', path: ['CONTEXT_ENGINE_TOKEN'], message: 'development service token is forbidden in production' });
     }
     if (new URL(value.REDIS_URL).password === '' && new URL(value.REDIS_URL).protocol !== 'rediss:') {
       context.addIssue({ code: 'custom', path: ['REDIS_URL'], message: 'production Redis must use a password or TLS' });

@@ -1,0 +1,259 @@
+"""Bounded local discovery; files are data and are never executed."""
+import hashlib
+import json
+import math
+import os
+import re
+import stat
+import time
+import uuid
+from dataclasses import dataclass
+from pathlib import Path
+
+VERSION = "1"
+DEFAULT_EXCLUDED = {".ssh", ".aws", ".azure", ".kube", ".terraform", ".gcloud", ".git", "node_modules", ".venv", ".next", "dist", "build", "coverage",
+                    "__pycache__", ".pytest_cache", ".ruff_cache", ".context-platform", ".context-platform.json"}
+LANGUAGES = {".ts": "TypeScript", ".tsx": "TypeScript", ".js": "JavaScript", ".jsx": "JavaScript",
+             ".py": "Python", ".go": "Go", ".rs": "Rust", ".java": "Java", ".sql": "SQL"}
+FRAMEWORKS = {"next": "Next.js", "react": "React", "@nestjs/core": "NestJS",
+              "graphql": "GraphQL", "mongoose": "MongoDB/Mongoose", "pg": "PostgreSQL",
+              "ioredis": "Redis", "vite": "Vite", "typescript": "TypeScript"}
+RULES = {
+    "credential_assignment": re.compile(r"""(?ix)(?:api[_-]?key|access[_-]?token|password|passwd|secret|jwt[_-]?secret|database_url)
+        ["']?\s*[:=]\s*["']?[^\s"',;]{4,}"""),
+    "known_credential": re.compile(r"(?:AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9_-]{20,}|eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)"),
+    "private_key": re.compile(r"-----BEGIN (?:[A-Z ]*PRIVATE KEY|CERTIFICATE)-----"),
+    "credential_url": re.compile(r"[a-z]+://[^\s/:]+:[^\s/@]+@"),
+}
+TOKEN = re.compile(r"[A-Za-z0-9_+/=-]{32,}")
+SAFE_PATH = re.compile(r"^[A-Za-z0-9_./@+ -]+$")
+
+
+@dataclass(frozen=True)
+class Limits:
+    max_file_bytes: int = 1_048_576
+    max_total_bytes: int = 52_428_800
+    max_entries: int = 20_000
+    max_depth: int = 24
+    max_seconds: float = 30
+
+    def validate(self):
+        if not (1 <= self.max_file_bytes <= 4_194_304 and
+                self.max_file_bytes <= self.max_total_bytes <= 104_857_600 and
+                1 <= self.max_entries <= 100_000 and 1 <= self.max_depth <= 48 and
+                0 < self.max_seconds <= 120):
+            raise ValueError("invalid_limits")
+
+
+def entropy(value):
+    return -sum((value.count(c) / len(value)) * math.log2(value.count(c) / len(value))
+                for c in set(value))
+
+
+def findings(text):
+    result = []
+    for rule, pattern in RULES.items():
+        for match in pattern.finditer(text):
+            result.append({"rule": rule, "line": text.count("\n", 0, match.start()) + 1})
+    for match in TOKEN.finditer(text):
+        if entropy(match.group()) >= 4.5:
+            result.append({"rule": "high_entropy", "line": text.count("\n", 0, match.start()) + 1})
+    return result
+
+
+def safe_path(path):
+    return bool(SAFE_PATH.fullmatch(path)) and not findings(path)
+
+
+def open_root(root):
+    # Resolve the operator-selected root once; all later reads are anchored to descriptors.
+    path = Path(root).resolve(strict=True)
+    return os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+
+
+def read_file(parent_fd, name, maximum):
+    descriptor = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent_fd)
+    try:
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode):
+            raise ValueError("special_file")
+        if before.st_size > maximum:
+            raise ValueError("oversized")
+        data = bytearray()
+        while len(data) <= maximum:
+            block = os.read(descriptor, min(65536, maximum + 1 - len(data)))
+            if not block:
+                break
+            data.extend(block)
+        after = os.fstat(descriptor)
+        if len(data) > maximum:
+            raise ValueError("oversized")
+        if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+            raise ValueError("changed_during_read")
+        return bytes(data)
+    finally:
+        os.close(descriptor)
+
+
+def scan(root, project_id, limits=None, exclusions=()):
+    limits = limits or Limits()
+    limits.validate()
+    project_id = str(uuid.UUID(project_id))
+    excluded = DEFAULT_EXCLUDED | set(exclusions)
+    if any(not re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", part) for part in excluded):
+        raise ValueError("invalid_exclusion")
+    started = time.monotonic()
+    sources, skipped, security, failures = [], [], [], []
+    discovery = {"languages": {}, "frameworks": [], "package_managers": [], "build_tools": [],
+                 "runtimes": [], "package_manifests": [], "workspace_patterns": [],
+                 "entry_point_candidates": [], "configuration": [], "infrastructure": [],
+                 "documentation": [], "api_schemas": [], "database_schema_candidates": [],
+                 "modules": None, "apis": None, "database_entities": None}
+    entries, bytes_read, limited = 0, 0, False
+
+    def skip(path, reason):
+        skipped.append({"path": path, "reason": reason})
+
+    def walk(fd, prefix="", depth=0):
+        nonlocal entries, bytes_read, limited
+        with os.scandir(fd) as items:
+            for entry in items:
+                if entries >= limits.max_entries or time.monotonic() - started >= limits.max_seconds:
+                    limited = True
+                    return
+                entries += 1
+                path = prefix + entry.name
+                if not safe_path(path):
+                    skip("<excluded-sensitive-path>", "unsafe_or_sensitive_path")
+                    continue
+                if entry.is_symlink():
+                    skip(path, "symlink")
+                    continue
+                name = entry.name.lower()
+                if entry.name in excluded:
+                    skip(path, "excluded_directory_or_file")
+                    continue
+                if entry.is_dir(follow_symlinks=False):
+                    if depth >= limits.max_depth:
+                        skip(path, "depth_limit")
+                        limited = True
+                        continue
+                    try:
+                        child = os.open(entry.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+                        try:
+                            walk(child, path + "/", depth + 1)
+                        finally:
+                            os.close(child)
+                    except OSError:
+                        failures.append({"path": path, "reason": "directory_unreadable"})
+                    if limited:
+                        return
+                    continue
+                if (name.startswith(".env") or name in {".npmrc", ".pypirc", "credentials", "id_rsa", "id_ed25519"}
+                        or Path(name).suffix in {".pem", ".key", ".p12", ".pfx", ".crt", ".cer", ".jks"}):
+                    skip(path, "credential_file")
+                    continue
+                managers = {"package-lock.json": "npm", "pnpm-lock.yaml": "pnpm",
+                            "yarn.lock": "yarn", "uv.lock": "uv", "poetry.lock": "poetry",
+                            "bun.lockb": "bun", "bun.lock": "bun"}
+                if Path(name).suffix in {".zip", ".tar", ".gz", ".tgz", ".7z", ".rar"}:
+                    skip(path, "archive")
+                    continue
+                if name in managers:
+                    discovery["package_managers"].append(managers[name])
+                    skip(path, "lockfile_metadata_only")
+                    continue
+                try:
+                    maximum = min(limits.max_file_bytes, limits.max_total_bytes - bytes_read)
+                    if maximum <= 0:
+                        limited = True
+                        return
+                    raw = read_file(fd, entry.name, maximum)
+                    bytes_read += len(raw)
+                    if b"\x00" in raw:
+                        skip(path, "binary")
+                        continue
+                    try:
+                        text = raw.decode("utf-8")
+                    except UnicodeDecodeError:
+                        skip(path, "binary_or_unsupported_encoding")
+                        continue
+                    detected = findings(text)
+                    if detected:
+                        security.extend({**item, "path": path} for item in detected)
+                        skip(path, "secret_detected")
+                        continue
+                    suffix = Path(name).suffix
+                    if suffix in LANGUAGES:
+                        language = LANGUAGES[suffix]
+                        discovery["languages"][language] = discovery["languages"].get(language, 0) + 1
+                    if suffix in {".md", ".rst", ".txt"}:
+                        discovery["documentation"].append(path)
+                    if name.startswith(("dockerfile", "compose", "docker-compose")):
+                        discovery["infrastructure"].append(path)
+                    if name in {"main.ts", "main.py", "index.ts", "index.js", "app.py"}:
+                        discovery["entry_point_candidates"].append(path)
+                    if name.startswith(("tsconfig", "next.config", "vite.config", "nest-cli")) or name in {"pyproject.toml", "package.json"}:
+                        discovery["configuration"].append(path)
+                    if name in {"openapi.json", "openapi.yaml", "openapi.yml"} or suffix in {".graphql", ".gql"}:
+                        discovery["api_schemas"].append(path)
+                    if suffix == ".sql" or name in {"schema.prisma"}:
+                        discovery["database_schema_candidates"].append(path)
+                    if name == "package.json":
+                        package = json.loads(text)
+                        if not isinstance(package, dict):
+                            raise ValueError("invalid_manifest")
+                        discovery["package_manifests"].append(path)
+                        discovery["runtimes"].append("Node.js")
+                        dependencies = {}
+                        for key in ("dependencies", "devDependencies"):
+                            value = package.get(key, {})
+                            if not isinstance(value, dict):
+                                raise ValueError("invalid_manifest")  # noqa: TRY004 - safe per-file reason code
+                            dependencies.update(value)
+                        discovery["frameworks"].extend(FRAMEWORKS[key] for key in dependencies if key in FRAMEWORKS)
+                        discovery["build_tools"].extend(key for key in dependencies if key in {"vite", "webpack", "rollup", "esbuild", "turbo", "nx", "@nestjs/cli"})
+                        workspace = package.get("workspaces", [])
+                        if isinstance(workspace, dict):
+                            workspace = workspace.get("packages", [])
+                        if isinstance(workspace, list):
+                            discovery["workspace_patterns"].extend(value for value in workspace
+                                if isinstance(value, str) and safe_path(value.replace("*", "x"))
+                                and not value.startswith("/") and ".." not in value.split("/"))
+                    if suffix == ".py" or name == "pyproject.toml":
+                        discovery["runtimes"].append("Python")
+                    if name == "pyproject.toml":
+                        import tomllib
+                        config = tomllib.loads(text)
+                        project = config.get("project", {})
+                        if not isinstance(project, dict):
+                            raise ValueError("invalid_manifest")
+                        deps = project.get("dependencies", [])
+                        if isinstance(deps, list) and any(isinstance(d, str) and re.match(r"(?i)^fastapi\b", d) for d in deps):
+                            discovery["frameworks"].append("FastAPI")
+                    sources.append({"source_id": str(uuid.uuid5(uuid.UUID(project_id), path)),
+                                    "project_id": project_id, "path": path,
+                                    "content_hash": hashlib.sha256(raw).hexdigest(),
+                                    "bytes": len(raw), "line_start": 1 if text else None,
+                                    "line_end": len(text.splitlines()) if text else None})
+                except (OSError, ValueError, RecursionError) as error:
+                    reason = str(error) if isinstance(error, ValueError) and str(error) in {
+                        "oversized", "special_file", "changed_during_read", "invalid_manifest"} else "unreadable_or_invalid_manifest"
+                    failures.append({"path": path, "reason": reason})
+
+    root_fd = os.dup(root) if isinstance(root, int) else open_root(root)
+    try:
+        walk(root_fd)
+    finally:
+        os.close(root_fd)
+    for key, value in discovery.items():
+        if isinstance(value, list):
+            discovery[key] = sorted(set(value))
+    return {"schema_version": 1, "scanner_version": VERSION, "project_id": project_id,
+            "status": "partial" if limited or failures else "complete",
+            "limits_reached": limited, "duration_ms": round((time.monotonic() - started) * 1000, 3),
+            "entries_observed": entries, "bytes_read": bytes_read, "files_scanned": len(sources),
+            "excluded_entries": len(skipped), "failures": sorted(failures, key=lambda r: r["path"]),
+            "security_findings": security, "discovery": discovery,
+            "sources": sorted(sources, key=lambda r: r["path"]), "excluded": skipped}
+

@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg';
 import type { AppEnvironment } from '../config/environment';
@@ -9,7 +9,7 @@ export class PostgresService implements OnModuleDestroy {
   private readonly pool: Pool;
   private readonly logger = new Logger(PostgresService.name);
 
-  constructor(config: ConfigService<AppEnvironment, true>) {
+  constructor(@Inject(ConfigService) config: ConfigService<AppEnvironment, true>) {
     this.pool = createPostgresPool({
       DATABASE_URL: config.get('DATABASE_URL', { infer: true }),
       PG_POOL_MAX: config.get('PG_POOL_MAX', { infer: true }),
@@ -34,16 +34,22 @@ export class PostgresService implements OnModuleDestroy {
 
   async withTransaction<T>(work: (client: PoolClient) => Promise<T>): Promise<T> {
     const client = await this.pool.connect();
+    let clientReleased = false;
     try {
       await client.query('BEGIN');
       const result = await work(client);
       await client.query('COMMIT');
       return result;
     } catch (error) {
-      await client.query('ROLLBACK');
+      try {
+        await client.query('ROLLBACK');
+      } catch {
+        client.release(error instanceof Error ? error : new Error('Transaction rollback failed'));
+        clientReleased = true;
+      }
       throw error;
     } finally {
-      client.release();
+      if (!clientReleased) client.release();
     }
   }
 
