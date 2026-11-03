@@ -45,4 +45,15 @@ describe('parseEnvironment', () => {
       CORS_ORIGINS: 'http://[::1]:3000',
     })).toThrow(/localhost origins/);
   });
+
+  it('rejects an inference URL that is not loopback', () => {
+    expect(() => parseEnvironment({ MLX_BASE_URL: 'http://model.example.test:8080' }))
+      .toThrow(/HTTP loopback URL/);
+  });
+
+  it('disables Qwen3 thinking by default and allows an explicit override', () => {
+    expect(parseEnvironment({}).MLX_QWEN3_ENABLE_THINKING).toBe(false);
+    expect(parseEnvironment({ MLX_QWEN3_ENABLE_THINKING: 'true' }).MLX_QWEN3_ENABLE_THINKING).toBe(true);
+  });
+
 });

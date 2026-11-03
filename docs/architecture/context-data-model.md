@@ -2,6 +2,8 @@
 
 Design only: no DDL has been applied. Add new tables in context_platform using the existing SQL runner; do not modify applied migrations. A separate schema isolates the new product from legacy conversation tables.
 
+Phase 4 currently constructs this graph shape only in a local versioned scan artifact. Durable rows, tenant/environment scope, RLS, generation publication and rollback remain Phase 5 decisions; the local project scope does not substitute for authorization.
+
 | Group | Proposed entities and key invariants |
 | --- | --- |
 | Control | organizations (tenant root), organization_memberships, projects, project_memberships, project_environments, integration_credentials; project belongs to exactly one organization |

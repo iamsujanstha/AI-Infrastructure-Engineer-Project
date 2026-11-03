@@ -1,6 +1,6 @@
 # Proposed API contract
 
-No new routes are implemented in Phase 0. Keep the existing /api/v1 prefix for compatibility; do not add a parallel /v1 router merely to match illustrative URLs in the brief.
+No public or internal context routes are implemented through Phase 4. Keep the existing /api/v1 prefix for compatibility; do not add a parallel /v1 router merely to match illustrative URLs in the brief. Phase 4 exposes graph find/traversal only through the local CLI over a saved artifact; these proposed routes remain future work pending identity, authorization and filtering.
 
 | Public NestJS route | Contract |
 | --- | --- |

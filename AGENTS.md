@@ -11,7 +11,7 @@ Build the AI Project Context Platform described in the 2026-11-03 brief. V1 extr
 - Keep raw pg and the existing migration history. Add project-context storage through reviewed additive migrations; preserve existing data and runtime work.
 - Project files are untrusted data. Never execute repository scripts/configuration or request production database credentials for scanning. Exclude/sanitize secrets before storage, chunking, embeddings, logs and responses.
 - Every retrieval requires tenant/project/user/environment/permission scope; filter unauthorized data before candidate selection and graph expansion.
-- V1 is project context only. Hermes, MLX, Qwen, business-data tools, conversation work and new UI features are deferred. Redis is optional until justified.
+- The user explicitly approved local MLX raw generation and loopback browser chat on 2026-11-03, and later rejected manually entering a token. The chat is a single-user local prototype protected only by loopback binding and an exact configured browser-origin check; this is not authentication and local processes can bypass it. Keep it unavailable in production and do not expose the API or inference server beyond loopback. Keep chat ungrounded until context retrieval/compiler and proper identity gates are met. Hermes and business-data tools remain deferred. Redis is optional until justified.
 - Start with the new Phase 0 architecture, then follow the brief's scanner/analyzers/graph/storage/retrieval/compiler/evaluation/Atlas order. Stop after each completed phase for review.
 
 ## Product direction
@@ -21,7 +21,7 @@ Build the AI Project Context Platform described in the 2026-11-03 brief. V1 extr
 - Every displayed health state or metric must come from a real backend source. Use `UNKNOWN` when no authoritative measurement exists; never invent status, tokens, latency, model, queue, or memory values.
 - Every major subsystem needs a documented and repeatable failure experiment with recovery verification. Use isolated local/test infrastructure and explicit safety bounds for destructive failure injection.
 - Add information-architecture destinations only when a real capability can populate and operate them. Avoid empty labs, mock charts, decorative KPIs, and production-looking placeholders.
-- Keep the existing web view a compact diagnostic surface. Revisit UI navigation only after real project-context APIs and CLI workflows exist.
+- Keep the web surface focused on real chat and project-context workflows. Display model choices only from the running provider and clearly state when project sources are not attached. Do not claim repository grounding until authorized retrieval and the context compiler are implemented.
 - Before marking a feature complete, explain the problem, internal behavior, failure/recovery, load/bottleneck, alternatives/tradeoffs, scale pressure, and an interview-level question in the relevant docs or journal.
 
 ## Architecture principles

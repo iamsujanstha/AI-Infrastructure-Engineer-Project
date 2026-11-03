@@ -3,9 +3,10 @@ import { ConfigurationModule } from './config/configuration.module';
 import { AppController } from './app.controller';
 import { HealthModule } from './health/health.module';
 import { ConversationModule } from './conversations/conversation.module';
+import { ChatModule } from './chat/chat.module';
 
 @Module({
-  imports: [ConfigurationModule, HealthModule, ConversationModule],
+  imports: [ConfigurationModule, HealthModule, ConversationModule, ChatModule],
   controllers: [AppController],
 })
 export class AppModule {}

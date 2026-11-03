@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { isIP } from 'node:net';
 
 const environmentSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -17,6 +18,12 @@ const environmentSchema = z.object({
   CONTEXT_ENGINE_URL: z.string().url().default('http://127.0.0.1:8000'),
   CONTEXT_ENGINE_TOKEN: z.string().min(32).default('context-engine-local-dev-token-change-before-use-32'),
   CONTEXT_ENGINE_TIMEOUT_MS: z.coerce.number().int().min(100).max(30000).default(1500),
+  MLX_BASE_URL: z.string().url().default('http://127.0.0.1:8080'),
+  MLX_DEFAULT_MODEL: z.string().min(1).max(250).default('mlx-community/Qwen3-8B-4bit'),
+  MLX_QWEN3_ENABLE_THINKING: z.enum(['true', 'false']).default('false').transform((value) => value === 'true'),
+  MLX_TIMEOUT_MS: z.coerce.number().int().min(1000).max(600000).default(180000),
+  MLX_CONTEXT_WINDOW_TOKENS: z.coerce.number().int().min(1024).max(1000000).default(8192),
+  MLX_MAX_OUTPUT_TOKENS: z.coerce.number().int().min(1).max(4096).default(512),
 }).superRefine((value, context) => {
   if (!['postgres:', 'postgresql:'].includes(new URL(value.DATABASE_URL).protocol)) {
     context.addIssue({ code: 'custom', path: ['DATABASE_URL'], message: 'must use postgres:// or postgresql://' });
@@ -25,6 +32,14 @@ const environmentSchema = z.object({
     context.addIssue({ code: 'custom', path: ['REDIS_URL'], message: 'must use redis:// or rediss://' });
   }
   const origins = value.CORS_ORIGINS.split(',').map((origin) => origin.trim()).filter(Boolean);
+  const mlxUrl = new URL(value.MLX_BASE_URL);
+  const mlxHost = mlxUrl.hostname.replace(/^\[|\]$/g, '');
+  const mlxLoopback = mlxHost === 'localhost' || (isIP(mlxHost) > 0 && isIP(mlxHost) === 4 && mlxHost.startsWith('127.'))
+    || (isIP(mlxHost) === 6 && mlxHost === '::1');
+  if (mlxUrl.protocol !== 'http:' || !mlxLoopback || mlxUrl.username || mlxUrl.password
+      || mlxUrl.search || mlxUrl.hash || !['', '/'].includes(mlxUrl.pathname)) {
+    context.addIssue({ code: 'custom', path: ['MLX_BASE_URL'], message: 'must be an HTTP loopback URL with no credentials or extra path' });
+  }
   for (const origin of origins) {
     try {
       const parsed = new URL(origin);

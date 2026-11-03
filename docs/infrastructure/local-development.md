@@ -3,10 +3,11 @@
 ## Prerequisites
 
 - Node.js 20.9 or newer and npm 10 or newer.
+- Optional local generation: Apple Silicon Mac, a Metal-capable macOS process, Python with MLX-LM installed, and a compatible cached or explicitly downloaded MLX model. See [local MLX inference](mlx-inference.md).
 - Docker Engine with the Compose plugin.
 - Ports `3000`, `4000`, `5432`, and `6379` available. PostgreSQL and Redis are published on loopback only.
 
-Verification ran with Node.js 26.8.1, npm 11.19.0, and Docker 29.4.1 on macOS. MLX/Hermes is not part of the Phase 1 local stack.
+Verification ran with Node.js 26.8.1, npm 11.19.0, and Docker 29.4.1 on macOS. MLX is optional and runs outside the Phase 1 context-engine stack. Hermes remains out of scope.
 
 ## Start
 
@@ -44,7 +45,7 @@ The Compose services have health checks, but the host-run API is not gated on th
 
 The inference probe is expected to return `503` until `INFERENCE_HEALTH_URL` points to a trusted endpoint. Configure it only for a local/private service. The probe does not expose the URL or response body.
 
-The Next.js control surface displays these checks. Its API base is compiled from `NEXT_PUBLIC_API_BASE_URL`; if that address changes, rebuild the web app.
+The home page provides local model chat; `/system` displays dependency checks. The chat connects automatically and reads model choices from the configured inference provider. The API accepts chat requests only from configured browser origins and refuses them in production. This is a browser-origin restriction for a loopback single-user prototype, not authentication: another local process can call the API directly. Keep the API bound to loopback. Conversation turns remain in page memory only, and the model receives no project retrieval. The web API base is compiled from `NEXT_PUBLIC_API_BASE_URL`; if that address changes, rebuild the web app.
 
 ## Useful commands
 
@@ -65,7 +66,7 @@ docker compose down
 
 ## Configuration and security limits
 
-`.env.example` documents supported settings. Configuration is parsed once at API startup; invalid values fail fast. The API and web development server bind to loopback by default. The checked-in Compose passwords are for loopback development only. Do not publish these ports, reuse credentials, or expose inference publicly. Phase 1 has no user authentication, authorization, TLS, backups, or production secrets integration.
+`.env.example` documents supported settings. Configuration is parsed once at API startup; invalid values fail fast. The API and web development server bind to loopback by default. `MLX_BASE_URL` must be HTTP loopback. The chat route refuses production mode, requires a loopback API bind, and checks the request's exact browser `Origin` against `CORS_ORIGINS`. Origin checks are not user authentication and do not stop local programs from calling the API. Do not publish these ports or expose inference publicly. Remote and multi-user use requires real identity and authorization.
 
 The API limiter currently stores counters in process memory. It is useful for local behavior and a single process only; multiple replicas would each enforce separate budgets. Forwarded client IP headers are not trusted automatically. If deployed behind a proxy, configure trusted hops narrowly before relying on client IP rate limits.
 

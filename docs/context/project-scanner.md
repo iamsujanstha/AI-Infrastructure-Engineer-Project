@@ -18,12 +18,21 @@ After workspace installation and build, node_modules/.bin/context is also availa
 
 Init creates .context-platform.json exclusively with mode 0600: schema version, local project UUID, supplied display name and optional exclude_names list. It refuses to overwrite existing configuration. A local UUID provides source identity, not platform authorization. Preserve the config to keep source IDs stable; it contains no credentials.
 
-Scan prints a JSON summary. To save the full provenance/exclusion/finding manifest:
+Scan prints a JSON summary with analyzer and graph coverage/counts. To save the full provenance, graph, exclusion and finding artifact:
 
 ~~~sh
 mkdir -p /absolute/path/to/project/.context-platform
 npm run context -- scan --root /absolute/path/to/project --output /absolute/path/to/project/.context-platform/scan.json
 ~~~
+
+The saved schema-version-3 scan artifact contains static facts and the Phase 4 graph. Query it locally with exact selectors and bounded adjacency:
+
+~~~sh
+npm run context -- graph find --artifact /absolute/path/to/project/.context-platform/scan.json --type dependency --name fastify
+npm run context -- graph traverse --artifact /absolute/path/to/project/.context-platform/scan.json --node-id <node-uuid> --depth 2 --limit 100
+~~~
+
+Graph query limits and provenance behavior are described in the [context graph guide](../architecture/context-graph.md).
 
 Output must not exist; it is created exclusively with mode 0600. Parent directories must already exist. The operator selects the output location; output parents are trusted local filesystem paths. Protect manifests because architecture/path/finding metadata can be sensitive. Exit codes: 0 complete, 1 initialization/configuration/output/root error, 2 partial scan caused by failure or limits. Secret exclusions can occur in a complete discovery scan; complete does not mean every source was indexed or absence of secrets.
 
@@ -31,9 +40,9 @@ Output must not exist; it is created exclusively with mode 0600. Parent director
 
 The shared scanner detects accepted-source language counts, Node/Python runtime evidence, known dependency framework/build-tool declarations, lockfile package-manager evidence, package manifests/workspace patterns, conventional entrypoint candidates, configuration files, infrastructure files, documentation and API/database schema candidates. It reads JSON/TOML as data. It never runs scripts, imports repository modules, installs their dependencies, sources environment files or connects to customer databases.
 
-Framework evidence is a dependency declaration, not proof a service is running. Conventional entrypoint/schema candidates are not resolved AST facts. Module/API/entity counts are null (UNKNOWN), because Phase 3 analyzers do not exist yet. Custom application/package naming is represented through manifest paths/workspace patterns, not guessed topology.
+Framework evidence is a dependency declaration, not proof a service is running. Conventional entrypoint/schema candidates remain candidates; analyzer facts are separate and carry static evidence labels and line ranges. See [Phase 3 analyzer coverage](analyzers.md). The legacy summary module/API/entity counters remain null (UNKNOWN) where the scanner cannot establish complete coverage; use analyzer fact kinds for observed syntax facts, not as runtime counts.
 
-Accepted files retain project_id, stable project+path UUID, relative path, SHA-256 hash, bytes and verified 1-based line range. Raw source text is never persisted in Phase 2 artifacts. Future analyzers must re-read through the same security boundary and revalidate the hash. Failed or secret-bearing files receive no accepted source/hash. No absolute root path or raw parser exception appears in output. Source IDs change when paths or the local project UUID change; rename tracking is future work.
+Accepted files retain project_id, stable project+path UUID, relative path, SHA-256 hash, bytes and verified 1-based line range. Raw source text is never persisted in artifacts. Phase 3 analyzes the screened in-memory bytes from that same descriptor read and binds every fact to the hash; no second untrusted path read is needed. Failed or secret-bearing files receive no accepted source/hash. No absolute root path or raw parser exception appears in output. Source IDs change when paths or the local project UUID change; rename tracking is future work.
 
 ## Security and bounds
 
@@ -43,7 +52,7 @@ Eligible UTF-8 text passes credential-assignment/known-format/private-key/creden
 
 Default limits: 1 MiB per eligible file, 50 MiB accepted reads, 20,000 observed entries, depth 24 and 30 seconds traversal time. Limits can be lowered via the Python Limits contract and have hard upper validation bounds. The elapsed-time check is cooperative between directory entries, not a hard timeout for a stalled filesystem syscall. Concurrently changed files are rejected using before/after stat checks. Scanning a live working tree is not an atomic Git snapshot; use a fixed checkout for reproducibility. Large excluded directories count as one exclusion, not invented descendant totals. Secret counts are rule matches, not unique confirmed credentials. Entropy/pattern checks can miss unfamiliar secrets and can exclude benign hashes/fixtures; never claim a clean scan guarantees no secrets.
 
-At scale, filesystem I/O and secret matching dominate this scanner. File/entry/byte/depth limits bound ordinary input work; repositories beyond these limits produce a partial result rather than a false complete report. Parser subprocess CPU/memory isolation and incremental indexing are later phases. No semantic retrieval, embeddings, graph or durable platform storage is claimed here.
+The scanner artifact uses schema version 3 and embeds graph schema version 1. At scale, filesystem I/O, secret matching, parsing, fact generation and graph materialization dominate. File/entry/byte/depth/traversal limits and Phase 3 per-file/project fact caps cause partial results rather than unbounded artifacts. Parsing runs in a spawned worker with a 2-second per-file deadline and recycling after 12 files, but no OS memory quota is applied. Do not accept shared multi-tenant repository input until worker memory isolation, cancellation and tenant admission are implemented. The graph is local and in-memory; no semantic retrieval, embeddings, durable platform storage or shared authorization is claimed here.
 
 ## Verification and failure experiment
 
@@ -60,4 +69,4 @@ Observed 2026-11-03 on the actual platform checkout before this guide was added:
 Interview challenge: why is path.resolve plus a prefix check insufficient against symlink replacement, and why does a complete discovery report not establish complete code analysis or absence of secrets?
 
 
-Final checks: 9 Python tests and Ruff passed; Node lint/typecheck, 15 Node tests (2 domain integration skips), and API/web/CLI builds passed. Container packaging build passed. The final root-descriptor refinement was tested with a replaced root path; the CLI retains the same descriptor from configuration read through scan. No database/API integration or Atlas acceptance is implied by these local scanner checks.
+Phase 2 final checks: 9 Python tests and Ruff passed; Node lint/typecheck, 15 Node tests (2 domain integration skips), and API/web/CLI builds passed. Container packaging build passed. The final root-descriptor refinement was tested with a replaced root path; the CLI retains the same descriptor from configuration read through scan. Phase 3 checks are recorded in [the analyzer guide](analyzers.md); Phase 4 graph checks are in [the graph guide](../architecture/context-graph.md) and the engineering journal. No database/API integration or Atlas acceptance is implied by these local scanner checks.

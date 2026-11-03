@@ -10,7 +10,13 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
-VERSION = "1"
+from analysis_worker import AnalyzerRunner
+from analyzers import analyze_project_rows
+from graph import build_graph
+
+VERSION = "3"
+SCHEMA_VERSION = 3
+MAX_PROJECT_FACTS = 50_000
 DEFAULT_EXCLUDED = {".ssh", ".aws", ".azure", ".kube", ".terraform", ".gcloud", ".git", "node_modules", ".venv", ".next", "dist", "build", "coverage",
                     "__pycache__", ".pytest_cache", ".ruff_cache", ".context-platform", ".context-platform.json"}
 LANGUAGES = {".ts": "TypeScript", ".tsx": "TypeScript", ".js": "JavaScript", ".jsx": "JavaScript",
@@ -103,19 +109,20 @@ def scan(root, project_id, limits=None, exclusions=()):
     if any(not re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", part) for part in excluded):
         raise ValueError("invalid_exclusion")
     started = time.monotonic()
-    sources, skipped, security, failures = [], [], [], []
+    sources, skipped, security, failures, analysis_rows = [], [], [], [], []
+    analyzer = AnalyzerRunner()
     discovery = {"languages": {}, "frameworks": [], "package_managers": [], "build_tools": [],
                  "runtimes": [], "package_manifests": [], "workspace_patterns": [],
                  "entry_point_candidates": [], "configuration": [], "infrastructure": [],
                  "documentation": [], "api_schemas": [], "database_schema_candidates": [],
                  "modules": None, "apis": None, "database_entities": None}
-    entries, bytes_read, limited = 0, 0, False
+    entries, bytes_read, limited, analysis_fact_count = 0, 0, False, 0
 
     def skip(path, reason):
         skipped.append({"path": path, "reason": reason})
 
     def walk(fd, prefix="", depth=0):
-        nonlocal entries, bytes_read, limited
+        nonlocal entries, bytes_read, limited, analysis_fact_count
         with os.scandir(fd) as items:
             for entry in items:
                 if entries >= limits.max_entries or time.monotonic() - started >= limits.max_seconds:
@@ -195,7 +202,7 @@ def scan(root, project_id, limits=None, exclusions=()):
                         discovery["entry_point_candidates"].append(path)
                     if name.startswith(("tsconfig", "next.config", "vite.config", "nest-cli")) or name in {"pyproject.toml", "package.json"}:
                         discovery["configuration"].append(path)
-                    if name in {"openapi.json", "openapi.yaml", "openapi.yml"} or suffix in {".graphql", ".gql"}:
+                    if "openapi" in name or "swagger" in name or suffix in {".graphql", ".gql"}:
                         discovery["api_schemas"].append(path)
                     if suffix == ".sql" or name in {"schema.prisma"}:
                         discovery["database_schema_candidates"].append(path)
@@ -231,11 +238,31 @@ def scan(root, project_id, limits=None, exclusions=()):
                         deps = project.get("dependencies", [])
                         if isinstance(deps, list) and any(isinstance(d, str) and re.match(r"(?i)^fastapi\b", d) for d in deps):
                             discovery["frameworks"].append("FastAPI")
-                    sources.append({"source_id": str(uuid.uuid5(uuid.UUID(project_id), path)),
-                                    "project_id": project_id, "path": path,
-                                    "content_hash": hashlib.sha256(raw).hexdigest(),
-                                    "bytes": len(raw), "line_start": 1 if text else None,
-                                    "line_end": len(text.splitlines()) if text else None})
+                    source = {"source_id": str(uuid.uuid5(uuid.UUID(project_id), path)),
+                              "project_id": project_id, "path": path,
+                              "content_hash": hashlib.sha256(raw).hexdigest(),
+                              "bytes": len(raw), "line_start": 1 if text else None,
+                              "line_end": len(text.splitlines()) if text else None}
+                    sources.append(source)
+                    analyzed = analyzer.analyze(path, source["source_id"], raw)
+                    if analysis_fact_count + len(analyzed["facts"]) > MAX_PROJECT_FACTS:
+                        failures.append({"path": path, "reason": "analysis_fact_limit"})
+                        analysis_rows.append({"path": path, "status": "failed", "reason": "analysis_fact_limit",
+                                              "duration_ms": analyzed["duration_ms"], "facts": []})
+                        source["analysis_status"] = "failed"
+                        limited = True
+                        return
+                    analysis_fact_count += len(analyzed["facts"])
+                    max_line = source["line_end"] or 1
+                    for fact in analyzed["facts"]:
+                        if not (1 <= fact["line_start"] <= fact["line_end"] <= max_line):
+                            analyzed = {**analyzed, "status": "failed", "reason": "invalid_source_range", "facts": []}
+                            failures.append({"path": path, "reason": "invalid_source_range"})
+                            break
+                        # Bind every fact to the exact screened bytes, not just the stable path ID.
+                        fact["content_hash"] = source["content_hash"]
+                    source["analysis_status"] = analyzed["status"]
+                    analysis_rows.append({"path": path, **analyzed})
                 except (OSError, ValueError, RecursionError) as error:
                     reason = str(error) if isinstance(error, ValueError) and str(error) in {
                         "oversized", "special_file", "changed_during_read", "invalid_manifest"} else "unreadable_or_invalid_manifest"
@@ -246,14 +273,19 @@ def scan(root, project_id, limits=None, exclusions=()):
         walk(root_fd)
     finally:
         os.close(root_fd)
+        analyzer.close()
+    analysis = analyze_project_rows(analysis_rows)
+    failures.extend(analysis["failures"])
     for key, value in discovery.items():
         if isinstance(value, list):
             discovery[key] = sorted(set(value))
-    return {"schema_version": 1, "scanner_version": VERSION, "project_id": project_id,
-            "status": "partial" if limited or failures else "complete",
-            "limits_reached": limited, "duration_ms": round((time.monotonic() - started) * 1000, 3),
-            "entries_observed": entries, "bytes_read": bytes_read, "files_scanned": len(sources),
-            "excluded_entries": len(skipped), "failures": sorted(failures, key=lambda r: r["path"]),
-            "security_findings": security, "discovery": discovery,
-            "sources": sorted(sources, key=lambda r: r["path"]), "excluded": skipped}
+    result = {"schema_version": SCHEMA_VERSION, "scanner_version": VERSION, "project_id": project_id,
+              "status": "partial" if limited or failures or analysis["status"] == "partial" else "complete",
+              "limits_reached": limited, "duration_ms": round((time.monotonic() - started) * 1000, 3),
+              "entries_observed": entries, "bytes_read": bytes_read, "files_scanned": len(sources),
+              "excluded_entries": len(skipped), "failures": sorted(failures, key=lambda r: r["path"]),
+              "security_findings": security, "discovery": discovery,
+              "sources": sorted(sources, key=lambda r: r["path"]), "analysis": analysis, "excluded": skipped}
+    result["graph"] = build_graph(result)
+    return result
 

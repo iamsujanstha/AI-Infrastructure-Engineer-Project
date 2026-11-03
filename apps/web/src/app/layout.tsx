@@ -2,8 +2,8 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Local AI Platform · System Health',
-  description: 'Private AI infrastructure control plane',
+  title: 'Project Context AI · Local Chat',
+  description: 'Authenticated local model chat with a replaceable inference provider',
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

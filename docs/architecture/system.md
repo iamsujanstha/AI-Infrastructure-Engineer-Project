@@ -6,6 +6,12 @@ Implementation update: Phase 1 runtime foundation is complete; see [setup, tests
 
 Phase 2 update: the local TypeScript CLI and shared Python scanner are implemented. See [commands, discovery evidence, security limits and failure tests](../context/project-scanner.md). Scanner/analyzer HTTP APIs, shared storage and Atlas acceptance are not claimed.
 
+Phase 3 update: Tree-sitter static analyzers now emit versioned, source-ranged facts for supported languages and local API/schema/document/dependency formats. See [coverage, evidence, limitations and failure tests](../context/analyzers.md). Unsupported/failed files produce partial status; no server ingestion, graph, storage, retrieval or Atlas acceptance was claimed for that phase.
+
+Phase 4 update: scans now produce a deterministic, project-scoped in-memory graph with bounded local exact-match and adjacency queries. See [graph schema, queries, provenance and limits](context-graph.md). The graph is not persisted or exposed through an API; server authorization, durable generations and Atlas acceptance remain future work.
+
+User direction update (2026-11-03): a local MLX raw-generation prototype and tokenless loopback browser chat are implemented; see [ADR-012](../decisions/ADR-012-local-mlx-inference.md), [ADR-013](../decisions/ADR-013-local-browser-chat.md), and [the local inference guide](../infrastructure/mlx-inference.md). The API uses a provider port with an MLX adapter and the browser fetches model IDs from the live provider. Browser chat is ungrounded and tab-local: it has no project retrieval, citations, durable conversation history, tenant identity or external-app SDK. The chat route checks configured browser origin, loopback binding and non-production mode; these checks are not authentication, and another local process can call the API. Project answers and FDE integration remain gated on authorization-aware storage, retrieval, context compilation, evaluation and identity.
+
 ## Repository assessment
 
 | Evidence | Current implementation | Treatment |
@@ -15,14 +21,14 @@ Phase 2 update: the local TypeScript CLI and shared Python scanner are implement
 | apps/api/src/database/ | pg pool, transaction helper, checksum/advisory-lock SQL runner | Retain raw pg and one migration authority |
 | apps/api/migrations/0001 through 0005 | pgvector plus 20 conversation-oriented tables | Preserve applied history and data; add isolated product schema later |
 | apps/api/src/redis/ | PING/readiness only | No queue/cache dependency justified for V1 foundation |
-| apps/web/src/ | One health screen | Retain existing diagnostic surface; UI is later work |
+| apps/web/src/ | Authenticated local chat and `/system` diagnostics | Chat calls NestJS and the live configured inference provider; no project context yet |
 | package.json | npm workspaces and lockfile | Keep npm; package-manager migration has no present benefit |
 
-There is no FastAPI application, scanner, CLI, SDK, context graph, retrieval implementation, tenant authorization, or Atlas integration in the inspected checkout. Existing owner_user_id constraints do not establish organization tenancy or permission-aware context retrieval. Existing tables named embeddings/documents/context_snapshots do not fulfill the new project-context contracts.
+There is no durable context graph, shared project API, retrieval implementation, tenant authorization, or Atlas integration. The Phase 4 graph exists only in local scanner artifacts. Existing owner_user_id constraints do not establish organization tenancy or permission-aware context retrieval. Existing tables named embeddings/documents/context_snapshots do not fulfill the new project-context contracts.
 
 ## Product scope
 
-V1 securely discovers and analyzes repository source, normalizes graph/provenance, indexes approved content, retrieves within a mandatory security scope, and compiles cited context without calling a generative model. Business data, personal memory, conversations, autonomous execution, Hermes, MLX, and Qwen are outside V1. Embedding models are V1 computation; they are distinct from future generative inference.
+V1 securely discovers and analyzes repository source, normalizes graph/provenance, indexes approved content, retrieves within a mandatory security scope, and compiles cited context. The local MLX CLI is an isolated raw-generation prototype and is not part of the project-context retrieval flow. A separately scoped, local-only Hermes stdio MCP adapter now exposes the Phase 4 scan and graph; it is not the authenticated Phase 10 `AgentContextProvider`, and it does not complete V1 retrieval. Business data, personal memory, persistent conversation integration, and autonomous execution remain outside this scope. Embedding models are context-computation components and remain distinct from generative inference.
 
 Atlas Commerce is the first real acceptance target. Its checkout location and approved revision have not been supplied or verified. Phase 9 cannot be declared complete using a substitute sample repository.
 
@@ -47,7 +53,7 @@ Two application runtimes, one database, HTTP communication. NestJS stays a modul
 
 Keep Node/npm workspaces and raw pg. Propose uv for an independently locked Python environment under apps/context-engine with Python 3.12 as a conservative initial baseline, validated during Phase 1. Use a shared Python analysis library behind both the local CLI runner and FastAPI. The TypeScript CLI coordinates commands; it does not duplicate parser logic. Packages are added only when consumed: SDK, generated API types, and HTTP client.
 
-Use tree-sitter-based TS/JS syntax parsing in Python as the initial analyzer proposal. Syntax facts and framework decorator facts must be distinguished from inferred runtime calls. Cross-file symbol resolution is a separate capability with confidence/provenance; do not claim a call graph from identifier-name matches alone. Phase 3 evaluates parser coverage against real NestJS/GraphQL patterns before accepting the parser ADR.
+Use separately version-locked Tree-sitter grammar wheels for Python/JS/TS/GraphQL/PostgreSQL/JSON/YAML in the shared Python analyzer core. Phase 3 validated syntax and NestJS/GraphQL patterns with fixtures and local source; see [ADR-010](../decisions/ADR-010-static-analyzer-toolkit.md). Syntax facts and framework decorator facts are explicitly labeled and are not runtime proof. Cross-file symbol resolution is a separate capability with confidence/provenance; do not claim a call graph from identifier-name matches alone.
 
 ## Migration and phase sequence
 
@@ -64,6 +70,8 @@ Use tree-sitter-based TS/JS syntax parsing in Python as the initial analyzer pro
 | 8 Evaluation | Versioned judged datasets and measured CLI reports | Recall@K, Precision@K, MRR, irrelevant rate and latency; explicit missing labels |
 | 9 Atlas integration | Real Atlas scan/index/search and expected-source judgments | Named revision, reviewed source labels, measured results; no secret exposure |
 | 10 Future agent integration | AgentContextProvider and Hermes tool adapter; replaceable runtime | Only after all V1 gates pass; no unrestricted DB access |
+
+The local Hermes adapter is a development bridge over the current in-memory scanner/graph only. The Phase 10 production integration remains gated on storage, authorization-scoped retrieval, compilation, and evaluation; see [ADR-014](../decisions/ADR-014-hermes-local-mcp.md).
 
 Phases 2–4 use sanitized local artifacts; durable graph indexing is added in Phase 5, preserving the requested order. A local scan may run without platform credentials because it never contacts shared storage. Shared project APIs require identity and authorization before their first release. The initial internal service identity is not a substitute for user authorization.
 
