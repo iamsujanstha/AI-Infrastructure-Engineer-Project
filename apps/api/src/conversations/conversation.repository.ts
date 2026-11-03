@@ -45,6 +45,16 @@ const messageColumns = `id, conversation_id AS "conversationId", owner_user_id A
 export class ConversationRepository {
   constructor(@Inject(PostgresService) private readonly database: PostgresService) {}
 
+  async list(ownerUserId: string, limit = 50): Promise<ConversationRecord[]> {
+    const result = await this.database.query<ConversationRow>(
+      `SELECT ${conversationColumns} FROM conversations
+       WHERE owner_user_id = $1 AND deleted_at IS NULL AND status = 'active'
+       ORDER BY last_message_at DESC, id DESC LIMIT $2`,
+      [ownerUserId, limit],
+    );
+    return result.rows;
+  }
+
   async create(ownerUserId: string, title: string, projectId: string | null): Promise<ConversationRecord> {
     const result = await this.database.query<ConversationRow>(
       `INSERT INTO conversations (owner_user_id, title, project_id)
@@ -198,6 +208,30 @@ export class MessageRepository {
     return { messages, nextAfterSequence: hasMore ? rows.at(-1)?.sequence ?? null : null };
   }
 
+  async listRecent(ownerUserId: string, conversationId: string, limit: number): Promise<MessageRecord[]> {
+    const conversation = await this.database.query<{ id: string }>(
+      `SELECT id FROM conversations WHERE id = $1 AND owner_user_id = $2 AND deleted_at IS NULL`,
+      [conversationId, ownerUserId],
+    );
+    if (!conversation.rows[0]) throw new ConversationNotFoundError();
+    const rows = (await this.database.query<MessageRow>(
+      `SELECT ${messageColumns} FROM messages
+       WHERE conversation_id = $1 AND owner_user_id = $2 ORDER BY sequence DESC LIMIT $3`,
+      [conversationId, ownerUserId, limit],
+    )).rows.reverse();
+    const ids = rows.map((row) => row.id);
+    const parts = ids.length === 0 ? [] : (await this.database.query<MessagePartRow>(
+      `SELECT id, message_id AS "messageId", part_index AS "partIndex", part_type AS "partType",
+              text_content AS "textContent", data, storage_key AS "storageKey"
+       FROM message_parts WHERE message_id = ANY($1::uuid[]) ORDER BY message_id, part_index`,
+      [ids],
+    )).rows;
+    return rows.map((row) => ({
+      ...row,
+      parts: parts.filter((part) => part.messageId === row.id).map(({ messageId: _messageId, ...part }) => part),
+    }));
+  }
+
   async appendAssistantDelta(ownerUserId: string, conversationId: string, messageId: string, text: string): Promise<void> {
     if (text.length === 0) return;
     await this.database.withTransaction(async (client) => {
@@ -229,15 +263,16 @@ export class MessageRepository {
     });
   }
 
-  async startTurn(ownerUserId: string, conversationId: string, content: string): Promise<{ userMessage: MessageRecord; assistantMessage: MessageRecord }> {
+  async startTurn(ownerUserId: string, conversationId: string, content: string, title?: string): Promise<{ userMessage: MessageRecord; assistantMessage: MessageRecord }> {
     return this.database.withTransaction(async (client) => {
       const conversation = await this.lockActiveConversation(client, ownerUserId, conversationId);
       await this.assertNoStreamingMessage(client, conversationId, ownerUserId);
       const allocation = await client.query<{ firstSequence: string }>(
         `UPDATE conversations SET next_message_sequence = next_message_sequence + 2,
+            title = CASE WHEN next_message_sequence = 1 AND $2::text IS NOT NULL THEN $2 ELSE title END,
             last_message_at = clock_timestamp(), updated_at = clock_timestamp(), version = version + 1
          WHERE id = $1 RETURNING (next_message_sequence - 2)::text AS "firstSequence"`,
-        [conversation.id],
+        [conversation.id, title ?? null],
       );
       const firstSequence = BigInt(allocation.rows[0]!.firstSequence);
       const user = await this.insertMessage(client, {

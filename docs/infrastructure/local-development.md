@@ -4,10 +4,11 @@
 
 - Node.js 20.9 or newer and npm 10 or newer.
 - Optional local generation: Apple Silicon Mac, a Metal-capable macOS process, Python with MLX-LM installed, and a compatible cached or explicitly downloaded MLX model. See [local MLX inference](mlx-inference.md).
+- Optional Hermes project-context tools: local Hermes Agent installation. The MCP adapter uses stdio and does not add a port.
 - Docker Engine with the Compose plugin.
-- Ports `3000`, `4000`, `5432`, and `6379` available. PostgreSQL and Redis are published on loopback only.
+- Ports `3000`, `4000`, `5050`, `5432`, and `6379` available. PostgreSQL, pgAdmin, and Redis are published on loopback only.
 
-Verification ran with Node.js 26.8.1, npm 11.19.0, and Docker 29.4.1 on macOS. MLX is optional and runs outside the Phase 1 context-engine stack. Hermes remains out of scope.
+Verification ran with Node.js 26.8.1, npm 11.19.0, and Docker 29.4.1 on macOS. MLX is optional and runs outside the Phase 1 context-engine stack. Hermes is an optional local agent integration; it does not power browser chat.
 
 ## Start
 
@@ -18,11 +19,11 @@ From the repository root:
 ```sh
 cp .env.example .env
 npm install
-docker compose up -d postgres redis
+docker compose up -d postgres redis pgadmin
 npm run dev
 ```
 
-The web app is available at `http://127.0.0.1:3000`; the API is at `http://127.0.0.1:4000`. The API allows both `127.0.0.1:3000` and `localhost:3000` as local browser origins. Use one hostname consistently when opening the app because browsers treat those origins as distinct. The root `.env` contains local-only sample credentials and is ignored by Git. Replace them for any non-local environment. `ConfigModule` loads the workspace `.env` and the root `.env`; shell environment variables take precedence.
+The web app is available at `http://127.0.0.1:3000`; its formatted service directory is at `/services`. The API is at `http://127.0.0.1:4000`; pgAdmin is at `http://127.0.0.1:5050`. Open the interactive API references at `http://127.0.0.1:4000/docs` (NestJS) and `http://127.0.0.1:8000/docs` (FastAPI); raw OpenAPI JSON is at `/docs/openapi.json` for NestJS and `/openapi.json` for FastAPI. The NestJS service directory API at `/api/v1/system/services` lists local URLs and connection details with passwords omitted. The API allows both `127.0.0.1:3000` and `localhost:3000` as local browser origins. Use one hostname consistently when opening the app because browsers treat those origins as distinct. The root `.env` contains local-only sample credentials and is ignored by Git. Replace them for any non-local environment. `ConfigModule` loads the workspace `.env` and the root `.env`; shell environment variables take precedence.
 
 Apply committed migrations to the configured database with:
 
@@ -42,10 +43,13 @@ The Compose services have health checks, but the host-run API is not gated on th
 | `GET /health/database` | PostgreSQL `SELECT 1` | `200` ready, `503` unavailable |
 | `GET /health/redis` | Redis `PING` | `200` ready, `503` unavailable |
 | `GET /health/inference` | Configured inference health URL | `200` ready; `503` if unconfigured or unavailable |
+| `GET /docs` | NestJS Swagger UI | Interactive API reference, including Try it out |
 
 The inference probe is expected to return `503` until `INFERENCE_HEALTH_URL` points to a trusted endpoint. Configure it only for a local/private service. The probe does not expose the URL or response body.
 
-The home page provides local model chat; `/system` displays dependency checks. The chat connects automatically and reads model choices from the configured inference provider. The API accepts chat requests only from configured browser origins and refuses them in production. This is a browser-origin restriction for a loopback single-user prototype, not authentication: another local process can call the API directly. Keep the API bound to loopback. Conversation turns remain in page memory only, and the model receives no project retrieval. The web API base is compiled from `NEXT_PUBLIC_API_BASE_URL`; if that address changes, rebuild the web app.
+The FastAPI reference documents `/health` and bearer-protected `/internal/health`. NestJS documents its current chat and health routes. The chat UI is a loopback-only single-user prototype: Swagger Try it out for those routes works from the API's own local docs origin, but the origin check is not authentication and production mode rejects chat requests. Do not expose either docs UI or API beyond localhost without adding real authentication and authorization.
+
+The home page provides local model chat; `/system` displays dependency checks. The NestJS service-directory endpoint returns configured service links but does not claim they are healthy. The chat connects automatically, restores saved conversations from PostgreSQL, and reads model choices from the configured inference provider. The API accepts chat requests only from configured browser origins and refuses them in production. This is a browser-origin restriction for a loopback single-user prototype, not authentication: another local process can call the API directly. Keep the API bound to loopback. The model receives bounded conversation history but no project retrieval. The web API base is compiled from `NEXT_PUBLIC_API_BASE_URL`; if that address changes, rebuild the web app. Hermes’ SQLite sessions and curated memory files are separate from PostgreSQL chat history.
 
 ## Useful commands
 
@@ -72,4 +76,4 @@ The API limiter currently stores counters in process memory. It is useful for lo
 
 ## Data and reset behavior
 
-PostgreSQL uses the `postgres_data` named volume and the pgvector PostgreSQL 17 image. Redis enables append-only persistence in the `redis_data` named volume. The initial checked-in migration enables pgvector; Phase 1 creates no domain tables. The existing local database was first bootstrapped with Prisma, so its `_prisma_migrations` metadata table is retained but unused; the raw-pg runner records history in `_platform_schema_migrations`. No migration history or application data is dropped. `docker compose down` keeps both volumes; `docker compose down -v` deletes them.
+PostgreSQL uses the `postgres_data` named volume and the pgvector PostgreSQL 17 image. Redis enables append-only persistence in the `redis_data` named volume. Migration `0001` enables pgvector, and migrations `0002`–`0005` create the existing core/conversation schema; the newer context-platform phases will add their own scoped schema incrementally. The existing local database was first bootstrapped with Prisma, so its `_prisma_migrations` metadata table is retained but unused; the raw-pg runner records history in `_platform_schema_migrations`. No migration history or application data is dropped. `docker compose down` keeps both volumes; `docker compose down -v` deletes them.

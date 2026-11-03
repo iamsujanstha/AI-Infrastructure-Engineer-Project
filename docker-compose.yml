@@ -4,7 +4,7 @@ services:
     environment:
       POSTGRES_DB: local_ai_platform
       POSTGRES_USER: platform
-      POSTGRES_PASSWORD: platform_dev_only
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-platform_dev_only}
     ports:
       - "127.0.0.1:5432:5432"
     volumes:
@@ -15,6 +15,20 @@ services:
       timeout: 3s
       retries: 10
       start_period: 5s
+    restart: unless-stopped
+
+  pgadmin:
+    image: dpage/pgadmin4:9.19.0
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-admin@localhost.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:-pgadmin_dev_only_change_me}
+    ports:
+      - "127.0.0.1:${PGADMIN_PORT:-5050}:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
 
   context-engine:
@@ -49,4 +63,5 @@ services:
 
 volumes:
   postgres_data:
+  pgadmin_data:
   redis_data:

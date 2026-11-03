@@ -7,11 +7,19 @@ import re
 import time
 import uuid
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Security
 from fastapi.responses import JSONResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger("context_engine")
 logging.basicConfig(level=logging.INFO, format="%(message)s")
+service_bearer = HTTPBearer(auto_error=False, scheme_name="ContextEngineServiceToken")
+
+
+class HealthResponse(BaseModel):
+    status: str = Field(description="Service status")
+    service: str = Field(description="Service name")
 
 
 def create_app(token: str | None = None) -> FastAPI:
@@ -21,7 +29,19 @@ def create_app(token: str | None = None) -> FastAPI:
     if os.environ.get("NODE_ENV") == "production" and "local-dev-token" in secret:
         raise RuntimeError("Development token forbidden in production")
 
-    app = FastAPI(title="Context Engine", docs_url=None, redoc_url=None, openapi_url=None)
+    app = FastAPI(
+        title="Context Engine API",
+        summary="Private project-context computation runtime",
+        description=(
+            "Internal API for the project context engine. The public health route only reports liveness; "
+            "the authenticated internal route checks access to this process. Repository scan and retrieval "
+            "operations are not exposed as HTTP endpoints yet."
+        ),
+        version="0.1.0",
+        docs_url="/docs",
+        redoc_url="/redoc",
+        openapi_url="/openapi.json",
+    )
 
     @app.middleware("http")
     async def correlation(request: Request, call_next):
@@ -44,14 +64,23 @@ def create_app(token: str | None = None) -> FastAPI:
         }))
         return response
 
-    @app.get("/health")
-    async def liveness():
+    @app.get("/health", response_model=HealthResponse, summary="Check process liveness", tags=["Health"])
+    async def liveness() -> HealthResponse:
         return {"status": "ok", "service": "context-engine"}
 
-    @app.get("/internal/health")
-    async def internal_health(request: Request):
-        supplied = request.headers.get("authorization", "")
-        if not hmac.compare_digest(supplied.encode(), f"Bearer {secret}".encode()):
+    @app.get(
+        "/internal/health",
+        response_model=HealthResponse,
+        summary="Check authenticated internal service access",
+        description="Requires the NestJS service token in the Authorization bearer scheme.",
+        tags=["Health"],
+        responses={401: {"description": "Missing or invalid service token"}},
+    )
+    async def internal_health(
+        credentials: HTTPAuthorizationCredentials | None = Security(service_bearer),
+    ) -> HealthResponse:
+        supplied = credentials.credentials if credentials is not None else ""
+        if not hmac.compare_digest(supplied.encode(), secret.encode()):
             raise HTTPException(status_code=401, detail="Invalid service credential")
         return {"status": "ok", "service": "context-engine"}
 

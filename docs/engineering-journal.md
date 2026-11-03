@@ -1,5 +1,14 @@
 # Engineering Journal
 
+## 2026-11-03 — Local browser chat conversation persistence
+
+- **Problem:** Browser refreshes discarded the transcript, which made ongoing work awkward. Hermes memory is curated cross-session notes, not an application transcript database.
+- **Observed behavior:** PostgreSQL already had owner-scoped conversations, messages, ordered message parts, and repositories for transactional turn creation/finalization. The browser endpoint bypassed them and sent the whole tab-local transcript directly to inference.
+- **Decision:** Route local chat turns through the existing conversation services and persist prompts plus assistant lifecycle state in PostgreSQL. Use a server-owned local principal so the browser needs no token; retain the loopback and non-production boundaries.
+- **Failure behavior:** Provider failures leave the user prompt and a failed assistant row. If the database fails after generation, response persistence can fail; recovery/reconciliation is not implemented. No failure injection was performed.
+- **Architectural lesson:** Conversation history, Hermes curated memory, retrieved code context, and the model context window serve different purposes and must remain distinct.
+- **Interview lesson:** Describe how the turn allocation transaction protects sequence/order, why inference cannot be part of the SQL transaction, and how an outbox or generation state reconciler could close the persistence gap later.
+
 ## 2026-11-03 — Local Hermes MCP context adapter
 
 - **Problem:** The local browser chat can generate text but cannot inspect project context, while Hermes is a separate agent runtime that needs a constrained local integration.
@@ -171,3 +180,15 @@ Record observed engineering lessons, not intended outcomes. For each significant
 - **Secondary failure/recovery observation:** MLX was not listening during one post-change request and the API returned 503. The cause of the stopped server was not established. Restarted the cached model in offline mode; model listing and subsequent chat generation returned HTTP 200.
 - **Verification:** Added adapter tests for default-disabled behavior, explicit opt-in, and non-Qwen model isolation; environment parsing tests verify the default and override. Full test suite passed 27 tests with 2 integration-gated skips; lint and workspace typecheck passed. Live API checks confirmed 1.12-second exact response and 4.69-second concise answer. No streaming, concurrent-load or long-context benchmark was run.
 - **Lesson:** When an API returns only final content, inspect provider-specific reasoning fields and token-budget accounting before assuming local hardware is slow. Prompt-template behavior can consume generation budget without producing user-visible answer text.
+
+## 2026-11-03 — Add a local service directory and pgAdmin
+
+- **Problem:** The user wanted one NestJS endpoint that lists the URLs and connection details needed to open the local services, including pgAdmin.
+- **What I initially thought:** Existing API docs and health routes could serve as the service index.
+- **What actually happens:** Compose had PostgreSQL and the context engine but no pgAdmin. Redis, MLX, and Hermes also have no conventional browser home page. Configured URLs do not prove that a process is currently healthy.
+- **Implementation:** Added `GET /api/v1/system/services`, documented it in NestJS Swagger, and returned a concise catalog for the web app, NestJS, PostgreSQL, pgAdmin, FastAPI, optional Redis, MLX, and the Hermes stdio MCP process. Added the Next.js `/services` page that presents the same backend data as responsive cards with links and copy actions, while keeping the raw JSON endpoint for integrations. The API endpoint is disabled outside non-production loopback development. Database connection fields and pgAdmin login email/password-variable names are included; credential values and passwords are never returned. Added pgAdmin 9.19.0 to Compose on loopback port 5050 with its own persistent volume, sample environment settings, and matching PostgreSQL connection instructions.
+- **Failure encountered / root cause / fix:** pgAdmin rejected `admin@local.test` because `.test` is a reserved email suffix; changed the development account to `admin@localhost.com` and verified the container reached HTTP 200. TypeScript typechecking did not detect Swagger's runtime metadata requirements under `tsx`; implicit property metadata caused OpenAPI schema generation to throw, and implicit constructor metadata left the directory service without `ConfigService`. Declared DTO property types explicitly and injected `ConfigService` with `@Inject`, then verified Nest started and published the route.
+- **Verification:** Web and NestJS typechecks and `docker compose config --quiet` passed. Previewed `/services` in the in-app browser and confirmed it rendered all eight service entries and the pgAdmin connection details. The live endpoint returned HTTP 200, Swagger JSON included `/api/v1/system/services`, pgAdmin returned HTTP 200 on port 5050, and the response contained no password value fields. No SQL query was run through pgAdmin, and no automated tests or load test were run.
+- **Tradeoffs and scale:** A small configured catalog is simpler and safer than exposing process discovery or probing every dependency on each request. It deliberately reports addresses and launch commands, not health. New services require an explicit catalog entry. At larger scale, use an authenticated/private service registry or deployment-specific links rather than expanding this loopback-only endpoint; never make a browser-facing endpoint return secrets.
+- **Architectural lesson:** Service discovery information, secret material, and readiness are different data. Keep a local operator index useful without making it a health dashboard or credential API.
+- **Interview lesson:** How would you design a service catalog that helps operators reach dependencies while preventing credential disclosure and avoiding false health claims?

@@ -2,7 +2,9 @@ import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { RequestMethod, VersioningType } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { json, urlencoded } from 'express';
+import type { NextFunction, Request, Response } from 'express';
 import rateLimit from 'express-rate-limit';
 import helmet from 'helmet';
 import pino from 'pino';
@@ -35,7 +37,11 @@ async function bootstrap(): Promise<void> {
       return 'info';
     },
   }));
-  app.use(helmet());
+  app.use((request: Request, response: Response, next: NextFunction) => {
+    // Swagger UI injects a small inline initializer; relax CSP only on the local docs page.
+    const docsRequest = request.path === '/docs' || request.path.startsWith('/docs/');
+    helmet(docsRequest ? { contentSecurityPolicy: false } : {})(request, response, next);
+  });
   app.use(json({ limit: '64kb' }));
   app.use(urlencoded({ extended: false, limit: '64kb' }));
   app.enableCors({
@@ -64,6 +70,22 @@ async function bootstrap(): Promise<void> {
   app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
   app.useGlobalFilters(new HttpExceptionFilter(logger));
   app.enableShutdownHooks();
+
+  const swaggerConfig = new DocumentBuilder()
+    .setTitle('Local AI Platform API')
+    .setDescription(
+      'Local development API for chat, saved conversations, and dependency readiness. ' +
+      'Chat endpoints are restricted to configured browser origins on a loopback deployment; this origin check is not authentication.',
+    )
+    .setVersion('1.0.0')
+    .build();
+  const openApiDocument = SwaggerModule.createDocument(app, swaggerConfig);
+  SwaggerModule.setup('docs', app, openApiDocument, {
+    jsonDocumentUrl: 'docs/openapi.json',
+    yamlDocumentUrl: 'docs/openapi.yaml',
+    customSiteTitle: 'Local AI Platform API',
+    swaggerOptions: { displayRequestDuration: true, persistAuthorization: false },
+  });
 
   const port = config.get('API_PORT', { infer: true });
   const host = config.get('API_HOST', { infer: true });

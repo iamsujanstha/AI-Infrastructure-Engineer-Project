@@ -7,6 +7,8 @@ const environmentSchema = z.object({
   API_PORT: z.coerce.number().int().min(1).max(65535).default(4000),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
   DATABASE_URL: z.string().url().default('postgresql://platform:platform_dev_only@127.0.0.1:5432/local_ai_platform'),
+  PGADMIN_PORT: z.coerce.number().int().min(1).max(65535).default(5050),
+  PGADMIN_DEFAULT_EMAIL: z.string().email().default('admin@localhost.com'),
   REDIS_URL: z.string().url().default('redis://127.0.0.1:6379'),
   PG_POOL_MAX: z.coerce.number().int().min(1).max(100).default(10),
   PG_CONNECTION_TIMEOUT_MS: z.coerce.number().int().min(100).max(30000).default(2000),

@@ -1,4 +1,5 @@
 import { Controller, Get, HttpStatus, Inject, Req, Res, VERSION_NEUTRAL } from '@nestjs/common';
+import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
 import type { Request, Response } from 'express';
 import type { AppEnvironment } from '../config/environment';
@@ -8,6 +9,7 @@ import { RedisService } from '../redis/redis.service';
 import { ContextEngineClient, ContextEngineRequestError } from '../context-engine/context-engine.client';
 
 @Controller({ path: 'health', version: VERSION_NEUTRAL })
+@ApiTags('Health')
 export class HealthController {
   constructor(
     @Inject(PostgresService) private readonly database: PostgresService,
@@ -17,11 +19,16 @@ export class HealthController {
   ) {}
 
   @Get()
+  @ApiOperation({ summary: 'Check API process liveness' })
+  @ApiResponse({ status: 200, schema: { example: { status: 'ok', service: 'local-ai-platform-api' } } })
   liveness(): { status: 'ok'; service: string } {
     return { status: 'ok', service: 'local-ai-platform-api' };
   }
 
   @Get('database')
+  @ApiOperation({ summary: 'Check PostgreSQL readiness' })
+  @ApiResponse({ status: 200, schema: { example: { status: 'ok', dependency: 'postgres' } } })
+  @ApiResponse({ status: 503, schema: { example: { statusCode: 503, status: 'unavailable', dependency: 'postgres' } } })
   async databaseReadiness(@Res({ passthrough: true }) response: Response): Promise<Record<string, string | number>> {
     try {
       await this.database.checkConnection();
@@ -33,6 +40,9 @@ export class HealthController {
   }
 
   @Get('redis')
+  @ApiOperation({ summary: 'Check Redis readiness' })
+  @ApiResponse({ status: 200, schema: { example: { status: 'ok', dependency: 'redis' } } })
+  @ApiResponse({ status: 503, schema: { example: { statusCode: 503, status: 'unavailable', dependency: 'redis' } } })
   async redisReadiness(@Res({ passthrough: true }) response: Response): Promise<Record<string, string | number>> {
     try {
       await this.redis.checkConnection();
@@ -44,6 +54,13 @@ export class HealthController {
   }
 
   @Get('inference')
+  @ApiOperation({ summary: 'Check configured inference endpoint readiness' })
+  @ApiResponse({ status: 200, schema: { example: { status: 'ok', dependency: 'inference' } } })
+  @ApiResponse({
+    status: 503,
+    description: 'Inference health endpoint is not configured or the configured endpoint is unavailable.',
+    schema: { example: { statusCode: 503, status: 'not_configured', dependency: 'inference' } },
+  })
   async inferenceReadiness(@Res({ passthrough: true }) response: Response): Promise<Record<string, string | number>> {
     const endpoint = this.config.get('INFERENCE_HEALTH_URL', { infer: true });
     if (!endpoint) {
@@ -62,6 +79,10 @@ export class HealthController {
     }
   }
   @Get('context-engine')
+  @ApiOperation({ summary: 'Check authenticated context-engine readiness' })
+  @ApiResponse({ status: 200, schema: { example: { status: 'ok', dependency: 'context-engine' } } })
+  @ApiResponse({ status: 503, description: 'Context engine is unavailable.' })
+  @ApiResponse({ status: 504, description: 'Context engine health request timed out.' })
   async engineReadiness(@Req() request: Request, @Res({ passthrough: true }) response: Response): Promise<Record<string, string | number>> {
     try {
       await this.engine.checkHealth(request);

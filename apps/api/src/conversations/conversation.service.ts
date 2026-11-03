@@ -6,6 +6,10 @@ import type { ConversationRecord, MessagePage, MessageRecord } from './conversat
 export class ConversationService {
   constructor(@Inject(ConversationRepository) private readonly conversations: ConversationRepository) {}
 
+  list(ownerUserId: string): Promise<ConversationRecord[]> {
+    return this.conversations.list(ownerUserId);
+  }
+
   create(ownerUserId: string, input: { title?: string; projectId?: string | null }): Promise<ConversationRecord> {
     return this.conversations.create(ownerUserId, normalizeTitle(input.title), input.projectId ?? null);
   }
@@ -41,12 +45,17 @@ export class MessageService {
     return this.messages.list(ownerUserId, conversationId, afterSequence, limit);
   }
 
-  startTurn(ownerUserId: string, conversationId: string, content: string): Promise<{ userMessage: MessageRecord; assistantMessage: MessageRecord }> {
+  listRecent(ownerUserId: string, conversationId: string, limit = 100): Promise<MessageRecord[]> {
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new RangeError('Recent message limit must be between 1 and 100.');
+    return this.messages.listRecent(ownerUserId, conversationId, limit);
+  }
+
+  startTurn(ownerUserId: string, conversationId: string, content: string, title?: string): Promise<{ userMessage: MessageRecord; assistantMessage: MessageRecord }> {
     const normalized = content.trim();
     if (normalized.length === 0 || normalized.length > 32_000) {
       throw new RangeError('User message must contain between 1 and 32000 characters.');
     }
-    return this.messages.startTurn(ownerUserId, conversationId, normalized);
+    return this.messages.startTurn(ownerUserId, conversationId, normalized, title);
   }
 
   appendAssistantDelta(ownerUserId: string, conversationId: string, messageId: string, text: string): Promise<void> {
