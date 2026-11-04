@@ -1,5 +1,9 @@
 # Retrieval and context compilation
 
+## Current implementation status
+
+The local CLI has a read-only lexical/structural search path over the current published PostgreSQL generation; see [ADR-017](../decisions/ADR-017-local-graph-retrieval.md) and the [storage operations guide](../context/storage-operations.md). It searches node names and JSON attributes, full-text/literal chunk content, returns provenance, and expands bounded same-generation graph neighbors. Semantic embeddings, hybrid fusion, shared API, source ACLs, and the deterministic context compiler are not implemented. Phase 6 is incomplete and Phase 7 has not started. Do not describe browser chat or Hermes as using this retrieval path.
+
 ~~~mermaid
 flowchart TD
     Request[Query with authorized scope and pinned generation] --> Filter[Restrict project environment and access labels]

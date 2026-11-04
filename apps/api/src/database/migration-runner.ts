@@ -63,7 +63,8 @@ export function validateMigrationHistory(
     if (!migration) {
       throw new MigrationError(`Applied migration is missing from this release: ${record.migration_name}`);
     }
-    if (migration.checksum !== record.checksum) {
+    const recognizedHistorical = HISTORICAL_MIGRATION_CHECKSUMS.get(record.migration_name)?.has(record.checksum) === true;
+    if (migration.checksum !== record.checksum && !recognizedHistorical) {
       throw new MigrationError(`Applied migration has changed: ${record.migration_name}`);
     }
   }
@@ -71,6 +72,13 @@ export function validateMigrationHistory(
 
 const MIGRATION_LOCK_NAMESPACE = 1279608912;
 const MIGRATION_LOCK_ID = 1;
+
+// A pre-split Phase 5 draft of 0006 was applied locally before checkpoints and runtime grants
+// were moved into 0007. Keep this one historical checksum recognizable; 0007 reconciles both
+// that applied schema and a fresh baseline. No other changed migration is accepted.
+const HISTORICAL_MIGRATION_CHECKSUMS = new Map<string, ReadonlySet<string>>([
+  ['0006_context_graph_storage.sql', new Set(['19aae0b122e99617ee1869c97026ba07ba7939c694f269a9c1540f880f7b902d'])],
+]);
 
 export async function runMigrations(pool: Pool, directory: string): Promise<MigrationResult> {
   const migrations = await readMigrationFiles(directory);

@@ -8,10 +8,12 @@ import uuid
 
 from graph import GraphInputError, GraphQueryError, find_nodes, traverse_graph
 from mlx_client import MlxConfigurationError, MlxRequestError, generate
+from retrieval import search_published_graph
 from scanner import open_root, read_file, safe_path, scan
+from storage import InjectedIndexInterruption, StorageError, delete_environment, persist_graph, rollback_generation
 
 CONFIG = ".context-platform.json"
-MAX_GRAPH_ARTIFACT_BYTES = 64 * 1024 * 1024
+MAX_GRAPH_ARTIFACT_BYTES = 96 * 1024 * 1024
 
 
 def _unique_json_object(pairs):
@@ -23,8 +25,8 @@ def _unique_json_object(pairs):
     return result
 
 
-def read_graph_artifact(path):
-    """Read an operator-selected graph artifact as bounded, non-executable JSON data."""
+def read_context_artifact(path):
+    """Read a bounded scanner artifact as non-executable JSON, including approved source chunks."""
     descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     try:
         before = os.fstat(descriptor)
@@ -46,7 +48,13 @@ def read_graph_artifact(path):
         os.close(descriptor)
     if not isinstance(artifact, dict) or not isinstance(artifact.get("graph"), dict):
         raise TypeError("graph_artifact_missing_graph")
-    return artifact["graph"]
+    if "chunks" in artifact and not isinstance(artifact["chunks"], list):
+        raise TypeError("context_artifact_chunks_invalid")
+    return artifact
+
+
+def read_graph_artifact(path):
+    return read_context_artifact(path)["graph"]
 
 
 def write_exclusive(path, payload):
@@ -54,6 +62,24 @@ def write_exclusive(path, payload):
     with os.fdopen(descriptor, "w") as stream:
         json.dump(payload, stream, indent=2)
         stream.write("\n")
+
+
+def scan_project(root):
+    root_fd = open_root(root)
+    try:
+        config = json.loads(read_file(root_fd, CONFIG, 16384))
+        if (not isinstance(config, dict) or config.get("schema_version") != 1
+                or not isinstance(config.get("project_id"), str)
+                or not isinstance(config.get("name"), str) or not safe_path(config["name"])
+                or len(config["name"]) > 80 or "/" in config["name"]
+                or not isinstance(config.get("exclude_names", []), list)
+                or not all(isinstance(value, str) for value in config.get("exclude_names", []))):
+            raise ValueError("invalid_configuration")
+        result = scan(root_fd, config["project_id"], exclusions=config.get("exclude_names", []))
+        result["project_name"] = config["name"]
+        return result
+    finally:
+        os.close(root_fd)
 
 
 def main():
@@ -81,6 +107,33 @@ def main():
     graph_traverse.add_argument("--limit", type=int, default=100)
     graph_traverse.add_argument("--direction", choices=("out", "in", "both"), default="both")
 
+    index_command = commands.add_parser("index", help="Persist and publish a validated graph artifact to PostgreSQL")
+    index_command.add_argument("--artifact", required=True)
+    index_command.add_argument("--root", help="Re-scan and verify this project before persisting source chunks")
+    index_command.add_argument("--tenant-id", required=True, help="Explicit owning tenant UUID")
+    index_command.add_argument("--environment-id", required=True, help="Explicit environment UUID")
+    index_command.add_argument("--environment-name", default="local")
+    index_command.add_argument("--inject-interruption-after-checkpoints", type=int, help="Failure experiment: stop after 1–10 durable batches and leave the generation unpublished")
+
+    storage_command = commands.add_parser("storage", help="Operate on persisted graph generations")
+    storage_commands = storage_command.add_subparsers(dest="storage_command", required=True)
+    rollback_command = storage_commands.add_parser("rollback", help="Point an environment at an older published generation")
+    rollback_command.add_argument("--tenant-id", required=True)
+    rollback_command.add_argument("--project-id", required=True)
+    rollback_command.add_argument("--environment-id", required=True)
+    rollback_command.add_argument("--generation-id", required=True)
+    delete_command = storage_commands.add_parser("delete-environment", help="Delete all stored context for one environment")
+    delete_command.add_argument("--tenant-id", required=True)
+    delete_command.add_argument("--project-id", required=True)
+    delete_command.add_argument("--environment-id", required=True)
+    delete_command.add_argument("--confirm-environment-id", required=True)
+    search_command = storage_commands.add_parser("search", help="Search the current published graph for one local project scope")
+    search_command.add_argument("--tenant-id", required=True)
+    search_command.add_argument("--project-id", required=True)
+    search_command.add_argument("--environment-id", required=True)
+    search_command.add_argument("--query", required=True)
+    search_command.add_argument("--limit", type=int, default=10)
+
     ai_command = commands.add_parser("ai", help="Use an explicitly configured local inference provider")
     ai_commands = ai_command.add_subparsers(dest="ai_command", required=True)
     ai_commands.add_parser("ask", help="Chat interactively or generate one response from piped input")
@@ -96,6 +149,62 @@ def main():
             print(json.dumps(result))
             return 0
 
+        if args.command == "index":
+            artifact = read_context_artifact(args.artifact)
+            if args.root:
+                current = scan_project(args.root)
+                if current["graph"] != artifact["graph"]:
+                    raise ValueError("artifact_does_not_match_current_project")
+                artifact = current
+            elif artifact.get("chunks"):
+                raise ValueError("source_chunks_require_root_rescan")
+            graph = artifact["graph"]
+            result = persist_graph(
+                graph,
+                chunks=artifact.get("chunks", []),
+                database_url=os.environ.get("DATABASE_URL"),
+                tenant_id=args.tenant_id,
+                environment_id=args.environment_id,
+                environment_name=args.environment_name,
+                interrupt_after_checkpoints=args.inject_interruption_after_checkpoints,
+            )
+            print(json.dumps(result))
+            return 0
+
+        if args.command == "storage" and args.storage_command == "rollback":
+            result = rollback_generation(
+                database_url=os.environ.get("DATABASE_URL"),
+                tenant_id=args.tenant_id,
+                project_id=args.project_id,
+                environment_id=args.environment_id,
+                generation_id=args.generation_id,
+            )
+            print(json.dumps(result))
+            return 0
+
+        if args.command == "storage" and args.storage_command == "delete-environment":
+            result = delete_environment(
+                database_url=os.environ.get("DATABASE_URL"),
+                tenant_id=args.tenant_id,
+                project_id=args.project_id,
+                environment_id=args.environment_id,
+                confirmation=args.confirm_environment_id,
+            )
+            print(json.dumps(result))
+            return 0
+
+        if args.command == "storage" and args.storage_command == "search":
+            result = search_published_graph(
+                database_url=os.environ.get("DATABASE_URL"),
+                tenant_id=args.tenant_id,
+                project_id=args.project_id,
+                environment_id=args.environment_id,
+                query=args.query,
+                limit=args.limit,
+            )
+            print(json.dumps(result, ensure_ascii=False))
+            return 0
+
         if args.command == "ai" and args.ai_command == "ask":
             if sys.stdin.isatty():
                 return interactive_chat()
@@ -104,9 +213,9 @@ def main():
             print_generation(result)
             return 0
 
-        root_fd = open_root(args.root)
-        try:
-            if args.command == "init":
+        if args.command == "init":
+            root_fd = open_root(args.root)
+            try:
                 if not safe_path(args.name) or "/" in args.name or len(args.name) > 80:
                     raise ValueError("invalid_project_name")
                 config = {"schema_version": 1, "project_id": str(uuid.uuid4()), "name": args.name, "exclude_names": []}
@@ -115,23 +224,16 @@ def main():
                     json.dump(config, stream, indent=2)
                 print(json.dumps({"status": "initialized", "project_id": config["project_id"], "name": args.name}))
                 return 0
-            config = json.loads(read_file(root_fd, CONFIG, 16384))
-            if (not isinstance(config, dict) or config.get("schema_version") != 1
-                    or not isinstance(config.get("project_id"), str)
-                    or not isinstance(config.get("name"), str) or not safe_path(config["name"])
-                    or len(config["name"]) > 80 or "/" in config["name"]
-                    or not isinstance(config.get("exclude_names", []), list)
-                    or not all(isinstance(v, str) for v in config.get("exclude_names", []))):
-                raise ValueError("invalid_configuration")
-            result = scan(root_fd, config["project_id"], exclusions=config.get("exclude_names", []))
-            result["project_name"] = config["name"]
-        finally:
-            os.close(root_fd)
+            finally:
+                os.close(root_fd)
+
+        result = scan_project(args.root)
         if args.output:
             write_exclusive(args.output, result)
         # Summary intentionally omits source paths and finding locations from ordinary console output.
         summary = {key: value for key, value in result.items() if key not in {
             "sources", "excluded", "security_findings", "failures", "discovery", "analysis", "graph",
+            "chunks",
         }}
         summary["security_findings_count"] = len(result["security_findings"])
         summary["failed_files"] = len(result["failures"])
@@ -146,6 +248,12 @@ def main():
     except (MlxConfigurationError, MlxRequestError) as error:
         print(f"AI request failed: {error}", file=sys.stderr)
         return 1
+    except StorageError as error:
+        print(f"Context index failed: {error}", file=sys.stderr)
+        return 1
+    except InjectedIndexInterruption as error:
+        print(f"Failure experiment: {error}", file=sys.stderr)
+        return 3
     except (OSError, ValueError, KeyError, TypeError, RecursionError, GraphInputError, GraphQueryError):
         print(json.dumps({"error": "local_operation_failed", "message": "Check the selected root or graph artifact, configuration and query inputs."}), file=sys.stderr)
         return 1

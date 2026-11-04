@@ -200,6 +200,7 @@ def build_graph(scan_result):
 
     identity_payload = {
         "graph_version": GRAPH_VERSION,
+        "chunker_version": scan_result.get("chunker_version"),
         "scanner_version": scan_result.get("scanner_version"),
         "analyzer_version": analyzer_version,
         "scan_status": scan_result.get("status"),
@@ -335,6 +336,9 @@ def build_graph(scan_result):
             "scan_status": scan_result.get("status", "unknown"),
             "analysis_status": analysis.get("status", "unknown"),
             "limits_reached": bool(scan_result.get("limits_reached")),
+            "chunker_version": scan_result.get("chunker_version"),
+            "chunk_count": scan_result.get("chunk_count", 0),
+            "chunk_content_bytes": scan_result.get("chunk_content_bytes", 0),
         },
         "node_count": len(nodes),
         "edge_count": len(edges),

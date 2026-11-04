@@ -258,9 +258,12 @@ The scanner is a local CLI, not the FastAPI server. It reads a chosen checkout w
 npm run context -- init --root "$PWD" --name ai-infrastructure-engineer-project
 mkdir -p .context-platform
 npm run context -- scan --root "$PWD" --output .context-platform/scan.json
+npm run db:migrate -w @local-ai/api
+npm run context -- index --artifact .context-platform/scan.json --root "$PWD" --tenant-id TENANT_UUID --environment-id ENVIRONMENT_UUID
+npm run context -- storage search --tenant-id TENANT_UUID --project-id "$(node -p 'require("./.context-platform.json").project_id')" --environment-id ENVIRONMENT_UUID --query "ChatService"
 ```
 
-The initialization creates `.context-platform.json` in the selected root. The scan artifact includes discovery, analyzer results, graph nodes/edges, source hashes, and line provenance. A `partial` status means some files were unsupported, failed, or hit a limit; it is not an empty or fully understood project. Avoid committing scan artifacts if the repository policy says they contain private source metadata.
+The initialization creates `.context-platform.json` in the selected root. The scan artifact includes discovery, analyzer results, graph nodes/edges, source hashes, line provenance and screened source chunks. At index time, `--root` causes a fresh scan; the CLI compares its graph with the supplied artifact and persists only the freshly generated chunks. Replace `TENANT_UUID` and `ENVIRONMENT_UUID` with stable UUIDs for this local scope. A `partial` status means some files were unsupported, failed, or hit a limit; it is not an empty or fully understood project. Scan artifacts and PostgreSQL chunks contain private repository excerpts. Avoid committing artifacts and protect pgAdmin/database access.
 
 Example bounded graph queries:
 
@@ -274,7 +277,7 @@ npm run context -- graph traverse \
   --node-id '<node-uuid>' --depth 2 --limit 100
 ```
 
-Find selectors are exact matches; graph traversal is bounded. This artifact is local and in-memory/queryable through the CLI, not yet a shared PostgreSQL context index. More detail: [scanner guide](../context/project-scanner.md), [analyzer guide](../context/analyzers.md), and [graph guide](../architecture/context-graph.md).
+Graph-file queries remain available against artifacts. PostgreSQL `storage search` uses the current published generation to search facts and source chunks, returning paths, line ranges and excerpts with bounded graph neighbors. It is local lexical/graph retrieval; semantic embeddings, authorization labels and prompt compilation are not implemented, and the browser chat/Hermes MCP do not use this query. More detail: [scanner guide](../context/project-scanner.md), [storage guide](../context/storage-operations.md), [analyzer guide](../context/analyzers.md), and [graph guide](../architecture/context-graph.md).
 
 ## Use Hermes with project context
 

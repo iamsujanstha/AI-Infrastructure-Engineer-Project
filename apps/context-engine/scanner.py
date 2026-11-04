@@ -14,8 +14,14 @@ from analysis_worker import AnalyzerRunner
 from analyzers import analyze_project_rows
 from graph import build_graph
 
-VERSION = "3"
-SCHEMA_VERSION = 3
+VERSION = "4"
+SCHEMA_VERSION = 4
+CHUNKER_VERSION = "1"
+MAX_CHUNK_CHARS = 4_000
+CHUNK_OVERLAP_CHARS = 300
+MAX_PROJECT_CHUNKS = 20_000
+MAX_CHUNKS_PER_SOURCE = 1_000
+MAX_PROJECT_CHUNK_BYTES = 16 * 1024 * 1024
 MAX_PROJECT_FACTS = 50_000
 DEFAULT_EXCLUDED = {".ssh", ".aws", ".azure", ".kube", ".terraform", ".gcloud", ".git", "node_modules", ".venv", ".next", "dist", "build", "coverage",
                     "__pycache__", ".pytest_cache", ".ruff_cache", ".context-platform", ".context-platform.json"}
@@ -101,6 +107,58 @@ def read_file(parent_fd, name, maximum):
         os.close(descriptor)
 
 
+def _source_chunks(project_id, source, text, remaining_chunks, remaining_bytes):
+    """Make bounded, line-provenanced chunks only after the full file passed secret screening."""
+    project_namespace = uuid.UUID(project_id)
+    chunks = []
+    offset = 0
+    start_line = 1
+    truncated = False
+    while offset < len(text):
+        if len(chunks) >= min(MAX_CHUNKS_PER_SOURCE, remaining_chunks):
+            truncated = True
+            break
+        end = min(offset + MAX_CHUNK_CHARS, len(text))
+        if end < len(text):
+            boundary = text.rfind("\n", offset + MAX_CHUNK_CHARS // 2, end)
+            if boundary >= offset:
+                end = boundary + 1
+        content = text[offset:end]
+        next_offset = max(offset + 1, end - CHUNK_OVERLAP_CHARS)
+        if content.strip():
+            encoded = content.encode("utf-8")
+            if len(encoded) > remaining_bytes:
+                truncated = True
+                break
+            newline_count = text.count("\n", offset, end)
+            end_line = start_line + newline_count
+            if end > offset and text[end - 1] == "\n":
+                end_line -= 1
+            end_line = max(start_line, end_line)
+            content_hash = hashlib.sha256(encoded).hexdigest()
+            chunk_index = len(chunks)
+            chunk_id = str(uuid.uuid5(
+                project_namespace,
+                f"context-chunk:{CHUNKER_VERSION}:{source['source_id']}:{chunk_index}:{content_hash}",
+            ))
+            chunks.append({
+                "chunk_id": chunk_id,
+                "source_id": source["source_id"],
+                "path": source["path"],
+                "source_content_hash": source["content_hash"],
+                "chunk_content_hash": content_hash,
+                "chunk_index": chunk_index,
+                "line_start": start_line,
+                "line_end": end_line,
+                "chunker_version": CHUNKER_VERSION,
+                "content": content,
+            })
+            remaining_bytes -= len(encoded)
+        start_line += text.count("\n", offset, next_offset)
+        offset = next_offset
+    return chunks, remaining_bytes, truncated
+
+
 def scan(root, project_id, limits=None, exclusions=()):
     limits = limits or Limits()
     limits.validate()
@@ -109,7 +167,7 @@ def scan(root, project_id, limits=None, exclusions=()):
     if any(not re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", part) for part in excluded):
         raise ValueError("invalid_exclusion")
     started = time.monotonic()
-    sources, skipped, security, failures, analysis_rows = [], [], [], [], []
+    sources, skipped, security, failures, analysis_rows, chunks = [], [], [], [], [], []
     analyzer = AnalyzerRunner()
     discovery = {"languages": {}, "frameworks": [], "package_managers": [], "build_tools": [],
                  "runtimes": [], "package_manifests": [], "workspace_patterns": [],
@@ -117,12 +175,13 @@ def scan(root, project_id, limits=None, exclusions=()):
                  "documentation": [], "api_schemas": [], "database_schema_candidates": [],
                  "modules": None, "apis": None, "database_entities": None}
     entries, bytes_read, limited, analysis_fact_count = 0, 0, False, 0
+    chunk_bytes_remaining = MAX_PROJECT_CHUNK_BYTES
 
     def skip(path, reason):
         skipped.append({"path": path, "reason": reason})
 
     def walk(fd, prefix="", depth=0):
-        nonlocal entries, bytes_read, limited, analysis_fact_count
+        nonlocal entries, bytes_read, limited, analysis_fact_count, chunk_bytes_remaining
         with os.scandir(fd) as items:
             for entry in items:
                 if entries >= limits.max_entries or time.monotonic() - started >= limits.max_seconds:
@@ -244,6 +303,14 @@ def scan(root, project_id, limits=None, exclusions=()):
                               "bytes": len(raw), "line_start": 1 if text else None,
                               "line_end": len(text.splitlines()) if text else None}
                     sources.append(source)
+                    source_chunks, chunk_bytes_remaining, chunk_truncated = _source_chunks(
+                        project_id, source, text,
+                        MAX_PROJECT_CHUNKS - len(chunks), chunk_bytes_remaining,
+                    )
+                    chunks.extend(source_chunks)
+                    if chunk_truncated:
+                        limited = True
+                        failures.append({"path": path, "reason": "project_chunk_limit"})
                     analyzed = analyzer.analyze(path, source["source_id"], raw)
                     if analysis_fact_count + len(analyzed["facts"]) > MAX_PROJECT_FACTS:
                         failures.append({"path": path, "reason": "analysis_fact_limit"})
@@ -280,12 +347,15 @@ def scan(root, project_id, limits=None, exclusions=()):
         if isinstance(value, list):
             discovery[key] = sorted(set(value))
     result = {"schema_version": SCHEMA_VERSION, "scanner_version": VERSION, "project_id": project_id,
+              "chunker_version": CHUNKER_VERSION,
               "status": "partial" if limited or failures or analysis["status"] == "partial" else "complete",
               "limits_reached": limited, "duration_ms": round((time.monotonic() - started) * 1000, 3),
               "entries_observed": entries, "bytes_read": bytes_read, "files_scanned": len(sources),
               "excluded_entries": len(skipped), "failures": sorted(failures, key=lambda r: r["path"]),
               "security_findings": security, "discovery": discovery,
-              "sources": sorted(sources, key=lambda r: r["path"]), "analysis": analysis, "excluded": skipped}
+              "sources": sorted(sources, key=lambda r: r["path"]), "chunks": chunks,
+              "chunk_count": len(chunks), "chunk_content_bytes": MAX_PROJECT_CHUNK_BYTES - chunk_bytes_remaining,
+              "analysis": analysis, "excluded": skipped}
     result["graph"] = build_graph(result)
     return result
 

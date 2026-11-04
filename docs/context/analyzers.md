@@ -1,6 +1,6 @@
 # Phase 3: static project analyzers
 
-The local `context scan` pipeline reads each eligible file once through the Phase 2 no-follow scanner, applies the secret detector, then parses the same in-memory bytes. Analyzer output contains normalized facts and source metadata only; it never stores source text. Every fact includes the stable `source_id`, screened-content SHA-256, relative path, and validated inclusive 1-based line range. Analyzer facts use schema version 1; the containing scan artifact uses schema version 3.
+The local `context scan` pipeline reads each eligible file once through the Phase 2 no-follow scanner, applies the secret detector, then parses the same in-memory bytes. Analyzer output contains normalized facts and source metadata only. The Phase 6 scanner artifact separately contains bounded source chunks for eligible files to support local retrieval; see the [scanner guide](project-scanner.md) for privacy and size limits. Every fact includes the stable `source_id`, screened-content SHA-256, relative path, and validated inclusive 1-based line range. Analyzer facts use schema version 1; the current containing scan artifact uses schema version 4.
 
 ## Implemented adapters
 

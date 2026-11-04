@@ -14,7 +14,7 @@ npm run context -- init --root /absolute/path/to/project --name atlas-commerce
 npm run context -- scan --root /absolute/path/to/project
 ~~~
 
-After workspace installation and build, node_modules/.bin/context is also available. The CLI is private/local for this phase, not a published SDK or standalone installer. It invokes the platform's shared Python scanner through an argument array without a shell. CONTEXT_ENGINE_PYTHON optionally selects a trusted operator-installed interpreter; project configuration cannot override it. No FastAPI server, database, credentials or network access is required.
+After workspace installation and build, node_modules/.bin/context is also available. The CLI is private/local for this phase, not a published SDK or standalone installer. It invokes the platform's shared Python scanner through an argument array without a shell. CONTEXT_ENGINE_PYTHON optionally selects a trusted operator-installed interpreter; project configuration cannot override it. Scanning does not require a FastAPI server, database, credentials or network access.
 
 Init creates .context-platform.json exclusively with mode 0600: schema version, local project UUID, supplied display name and optional exclude_names list. It refuses to overwrite existing configuration. A local UUID provides source identity, not platform authorization. Preserve the config to keep source IDs stable; it contains no credentials.
 
@@ -25,7 +25,7 @@ mkdir -p /absolute/path/to/project/.context-platform
 npm run context -- scan --root /absolute/path/to/project --output /absolute/path/to/project/.context-platform/scan.json
 ~~~
 
-The saved schema-version-3 scan artifact contains static facts and the Phase 4 graph. Query it locally with exact selectors and bounded adjacency:
+The saved schema-version-4 scan artifact contains static facts, the Phase 4 graph, and bounded text chunks from eligible files that passed the whole-file secret screen. The artifact therefore contains project source excerpts and must be kept private. Query graph metadata locally with exact selectors and bounded adjacency:
 
 ~~~sh
 npm run context -- graph find --artifact /absolute/path/to/project/.context-platform/scan.json --type dependency --name fastify
@@ -42,7 +42,7 @@ The shared scanner detects accepted-source language counts, Node/Python runtime 
 
 Framework evidence is a dependency declaration, not proof a service is running. Conventional entrypoint/schema candidates remain candidates; analyzer facts are separate and carry static evidence labels and line ranges. See [Phase 3 analyzer coverage](analyzers.md). The legacy summary module/API/entity counters remain null (UNKNOWN) where the scanner cannot establish complete coverage; use analyzer fact kinds for observed syntax facts, not as runtime counts.
 
-Accepted files retain project_id, stable project+path UUID, relative path, SHA-256 hash, bytes and verified 1-based line range. Raw source text is never persisted in artifacts. Phase 3 analyzes the screened in-memory bytes from that same descriptor read and binds every fact to the hash; no second untrusted path read is needed. Failed or secret-bearing files receive no accepted source/hash. No absolute root path or raw parser exception appears in output. Source IDs change when paths or the local project UUID change; rename tracking is future work.
+Accepted files retain project_id, stable project+path UUID, relative path, SHA-256 hash, bytes and verified 1-based line range. For Phase 6 retrieval, text from files that pass whole-file secret screening is split into overlapping, line-provenanced chunks (4,000 characters maximum, 300-character overlap). The scan artifact contains these chunk bodies, capped at 20,000 chunks and 16 MiB total chunk content; crossing a cap marks the scan partial. These files are not redacted; a file with a detected credential or high-entropy pattern is excluded as a whole. Heuristics cannot prove that arbitrary source text contains no sensitive information, so protect scan artifacts and local PostgreSQL as private source data. Phase 3 analyzes the screened in-memory bytes from the same descriptor read and binds facts/chunks to the source hash. No absolute root path or raw parser exception appears in output. Source IDs change when paths or the local project UUID change; rename tracking is future work.
 
 ## Security and bounds
 
@@ -52,7 +52,7 @@ Eligible UTF-8 text passes credential-assignment/known-format/private-key/creden
 
 Default limits: 1 MiB per eligible file, 50 MiB accepted reads, 20,000 observed entries, depth 24 and 30 seconds traversal time. Limits can be lowered via the Python Limits contract and have hard upper validation bounds. The elapsed-time check is cooperative between directory entries, not a hard timeout for a stalled filesystem syscall. Concurrently changed files are rejected using before/after stat checks. Scanning a live working tree is not an atomic Git snapshot; use a fixed checkout for reproducibility. Large excluded directories count as one exclusion, not invented descendant totals. Secret counts are rule matches, not unique confirmed credentials. Entropy/pattern checks can miss unfamiliar secrets and can exclude benign hashes/fixtures; never claim a clean scan guarantees no secrets.
 
-The scanner artifact uses schema version 3 and embeds graph schema version 1. At scale, filesystem I/O, secret matching, parsing, fact generation and graph materialization dominate. File/entry/byte/depth/traversal limits and Phase 3 per-file/project fact caps cause partial results rather than unbounded artifacts. Parsing runs in a spawned worker with a 2-second per-file deadline and recycling after 12 files, but no OS memory quota is applied. Do not accept shared multi-tenant repository input until worker memory isolation, cancellation and tenant admission are implemented. The graph is local and in-memory; no semantic retrieval, embeddings, durable platform storage or shared authorization is claimed here.
+The scanner artifact uses schema version 4 and embeds graph schema version 1. At scale, filesystem I/O, secret matching, parsing, chunk generation, fact generation and graph materialization dominate. File/entry/byte/depth/traversal limits, fact caps and chunk caps produce partial results rather than unbounded artifacts. Parsing runs in a spawned worker with a 2-second per-file deadline and recycling after 12 files, but no OS memory quota is applied. Do not accept shared multi-tenant repository input until worker memory isolation, cancellation and tenant admission are implemented. Chunking supplies source evidence for local lexical retrieval; semantic embeddings, shared authorization and context compilation remain future work.
 
 ## Verification and failure experiment
 

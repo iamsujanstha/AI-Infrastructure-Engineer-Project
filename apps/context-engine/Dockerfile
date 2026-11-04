@@ -11,7 +11,7 @@ RUN apt-get update \
 FROM python:3.12-slim AS runtime
 WORKDIR /app
 COPY --from=builder /app/.venv /app/.venv
-COPY app.py scanner.py analyzers.py analysis_worker.py graph.py local_cli.py ./
+COPY app.py scanner.py analyzers.py analysis_worker.py graph.py local_cli.py storage.py ./
 RUN useradd --uid 10001 --create-home engine
 USER engine
 EXPOSE 8000

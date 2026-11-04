@@ -6,11 +6,22 @@ The active brief starts a new Phase 0–10 sequence. Phase 0 is documented in th
 
 For a practical walkthrough of the tools, ports, PostgreSQL/pgvector queries, Hermes storage, current flows and next implementation phases, read the [Local Platform Guide](docs/guides/local-platform-guide.md).
 
-Phase 1 adds a locked Python 3.12/FastAPI runtime, authenticated internal health calls, request/trace propagation, a bounded NestJS client, Compose packaging and repeatable outage/recovery experiments. See [foundation setup and verification](docs/infrastructure/context-engine-foundation.md). PostgreSQL/pgvector and the raw-pg migration runner support the existing conversation persistence and future context storage. Redis is optional under the legacy Compose profile. The local scanner, static analyzers, in-memory graph artifact and bounded graph queries are implemented; shared project APIs, durable graph storage and retrieval remain future phases. The earlier laboratory roadmap is historical and superseded by the new implementation order.
+Phase 1 adds a locked Python 3.12/FastAPI runtime, authenticated internal health calls, request/trace propagation, a bounded NestJS client, Compose packaging and repeatable outage/recovery experiments. See [foundation setup and verification](docs/infrastructure/context-engine-foundation.md). PostgreSQL/pgvector and the raw-pg migration runner support existing conversation persistence and context storage. Redis is optional under the legacy Compose profile. The local scanner, analyzers and graph artifact are implemented. Phase 5 adds local scoped graph storage; the Phase 6 local retrieval baseline stores screened chunks and searches published graph facts plus source excerpts with provenance. See [storage operations](docs/context/storage-operations.md). Semantic/hybrid retrieval, source ACLs, context compilation, and browser-chat/Hermes integration remain open. The earlier laboratory roadmap is historical and superseded by the new implementation order.
 
 ## Core distinctions
 
-Phase 2 adds the local [project scanner and CLI](docs/context/project-scanner.md): build the CLI, then run `npm run context -- init --root /path/to/project --name project-name` and `npm run context -- scan --root /path/to/project`. It produces bounded discovery/provenance with secret exclusions. Phase 3 adds [static analyzers](docs/context/analyzers.md) for source structure, REST/GraphQL/OpenAPI, PostgreSQL DDL, documentation and dependency declarations. Phase 4 builds a [versioned local context graph](docs/architecture/context-graph.md) with bounded find and adjacency queries. Unsupported or failed files remain explicit and no durable graph storage is claimed.
+Phase 2 adds the local [project scanner and CLI](docs/context/project-scanner.md): build the CLI, then run `npm run context -- init --root /path/to/project --name project-name` and `npm run context -- scan --root /path/to/project`. It produces bounded discovery/provenance with secret exclusions. Phase 3 adds [static analyzers](docs/context/analyzers.md) for source structure, REST/GraphQL/OpenAPI, PostgreSQL DDL, documentation and dependency declarations. Phase 4 builds a [versioned local context graph](docs/architecture/context-graph.md) with bounded find and adjacency queries. Phase 5 adds local PostgreSQL persistence of these graph artifacts. Unsupported or failed files remain explicit.
+
+### Persisting a local graph artifact
+
+Regenerate the Python dependency lock with `cd apps/context-engine && uv lock`, apply SQL migrations with `npm run db:migrate -w @local-ai/api`, and ensure `DATABASE_URL` is set. Then:
+
+```sh
+npm run context -- scan --root /path/to/project --output /tmp/project-scan.json
+npm run context -- index --artifact /tmp/project-scan.json --root /path/to/project --tenant-id "$(uuidgen)" --environment-id "$(uuidgen)" --environment-name local
+```
+
+Reuse the same tenant and environment UUIDs for later scans of this scope. Project UUID comes from `.context-platform.json`. Batches checkpoint independently; only the final transaction changes the published head. An identical repeat reports `already_published`. Read the [storage operations guide](docs/context/storage-operations.md), [implemented data model](docs/architecture/context-data-model.md), and [ADR-016](docs/decisions/ADR-016-atomic-context-graph-generations.md) for operations and limits. The CLI switches to a restricted runtime role, but the local owner can bypass RLS and caller-supplied UUIDs are not user authentication.
 
 ```text
 Persistent memory ≠ conversation history ≠ retrieved context ≠ inference context window
