@@ -24,14 +24,15 @@ export class ServiceDirectoryService {
   getDirectory(): ServiceDirectoryResponseDto {
     const environment = this.config.get('NODE_ENV', { infer: true });
     const apiHost = this.config.get('API_HOST', { infer: true });
-    if (environment === 'production' || !isLoopback(apiHost)) {
+    const containerMode = this.config.get('LOCAL_CHAT_CONTAINER_MODE', { infer: true });
+    if (environment === 'production' || (!isLoopback(apiHost) && !(containerMode && apiHost === '0.0.0.0'))) {
       throw new NotFoundException('The local service directory is available only in loopback development.');
     }
 
     const apiUrl = localUrl('127.0.0.1', this.config.get('API_PORT', { infer: true }));
     const databaseUrl = new URL(this.config.get('DATABASE_URL', { infer: true }));
     const redisUrl = new URL(this.config.get('REDIS_URL', { infer: true }));
-    const configuredContextEngineUrl = new URL(this.config.get('CONTEXT_ENGINE_URL', { infer: true }));
+    const configuredContextEngineUrl = new URL(this.config.get('CONTEXT_ENGINE_PUBLIC_URL', { infer: true }));
     const contextEngineUrl = `${configuredContextEngineUrl.origin}${configuredContextEngineUrl.pathname.replace(/\/$/, '')}`;
     const mlxUrl = this.config.get('MLX_BASE_URL', { infer: true }).replace(/\/$/, '');
     const pgAdminUrl = localUrl('127.0.0.1', this.config.get('PGADMIN_PORT', { infer: true }));

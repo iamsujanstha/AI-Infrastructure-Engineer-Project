@@ -42,6 +42,8 @@ def create_app(token: str | None = None) -> FastAPI:
         redoc_url="/redoc",
         openapi_url="/openapi.json",
     )
+    from policy_compute import register_policy_routes
+    register_policy_routes(app, secret, service_bearer)
 
     @app.middleware("http")
     async def correlation(request: Request, call_next):

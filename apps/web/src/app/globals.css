@@ -1,14 +1,16 @@
 @import "tailwindcss";
-@import "highlight.js/styles/github-dark.css";
+@import "highlight.js/styles/github.css";
 
 :root {
-  color-scheme: dark;
-  --background: #101312;
-  --surface: #171c1a;
-  --border: #29312d;
-  --muted: #9ba7a0;
-  --foreground: #edf3ef;
-  --accent: #a8efc2;
+  color-scheme: light;
+  --background: #ffffff;
+  --surface: #ffffff;
+  --border: #ebebeb;
+  --muted: #717171;
+  --foreground: #222222;
+  --accent: #ff385c;
+  --accent-hover: #e31c5f;
+  --wash: #f7f7f7;
 }
 
 * { box-sizing: border-box; }
@@ -18,6 +20,68 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+  -webkit-font-smoothing: antialiased;
 }
 
-button { font: inherit; }
+button { font: inherit; cursor: pointer; }
+a { color: inherit; text-decoration: none; }
+a:hover { color: var(--accent-hover); }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  outline-offset: 2px;
+}
+
+input, select, textarea {
+  color: var(--foreground);
+  background-color: #fff;
+  border-color: #b0b0b0;
+  border-radius: 10px;
+}
+input::placeholder, textarea::placeholder { color: #8a8a8a; }
+input:disabled, select:disabled, textarea:disabled, button:disabled { cursor: not-allowed; opacity: .58; }
+
+.surface-card {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 4%);
+}
+.field-control {
+  margin-top: 6px;
+  width: 100%;
+  border: 1px solid #b0b0b0;
+  border-radius: 10px;
+  background: #fff;
+  padding: 10px 12px;
+  font-size: 14px;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+.field-control:focus { border-color: #222; outline: none; box-shadow: 0 0 0 1px #222; }
+.primary-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--accent);
+  padding: 10px 16px;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  transition: background 140ms ease, transform 140ms ease;
+}
+.primary-button:hover:not(:disabled) { background: var(--accent-hover); }
+.primary-button:active:not(:disabled) { transform: scale(.98); }
+.subtle-button { color: var(--muted); transition: color 140ms ease; }
+.subtle-button:hover:not(:disabled) { color: var(--foreground); }
+.cms-header { border-color: var(--border); }
+.role-pill { border: 1px solid #ebebeb; border-radius: 999px; background: var(--wash); padding: 5px 10px; color: #484848; }
+
+/* Keep existing status and action utility classes on the shared coral palette. */
+.text-emerald-200, .text-emerald-100 { color: var(--accent) !important; }
+.text-amber-100 { color: #9a3412 !important; }
+button.bg-emerald-200, a.bg-emerald-200 { background-color: var(--accent) !important; color: #fff !important; }
+button.bg-emerald-200:hover:not(:disabled), a.bg-emerald-200:hover { background-color: var(--accent-hover) !important; }
+
+::selection { background: #ffe2e7; color: #222; }

@@ -1,126 +1,160 @@
-# Context graph storage operations
+# Project scanning, graph storage and Hermes operations
 
-## What this feature does
+This is the separate project-code workflow, not company PDF ingestion. It remains a local operator capability. The browser CMS does not query this graph, and the current Hermes bridge does not query its PostgreSQL generations. [Architecture](../architecture/system.md#project-context-roadmap) defines the remaining shared-service gates.
 
-The scanner and analyzers produce a local graph with source hashes, line ranges, graph node IDs and relationships. `context index` persists one validated artifact plus secret-screened text chunks in PostgreSQL. It writes both as an immutable generation and updates one head pointer only after every source, node, edge and chunk has been stored.
+## Why retain this path
 
-This is a local operator workflow. PostgreSQL search retrieves lexical graph facts and screened text chunks from the current published generation, then adds bounded same-generation neighbors. It does not generate embeddings or serve browser chat. The tenant and environment IDs are operator-supplied scope identifiers, not proof of the caller's identity. Chunk bodies are private source excerpts, not redacted text; secret-detection heuristics are imperfect.
+Code understanding needs file/symbol/schema provenance and coherent revisions, not just semantically similar prose. The scanner discovers approved files without executing them; static analyzers produce evidence; a graph connects explicit relationships; immutable publication lets later readers pin a consistent snapshot.
 
-## Setup and run
+The cost is parser/version maintenance, private source artifacts, graph memory, storage/checkpoints and incomplete static coverage. Use it when structural/source evidence is needed. Do not add a graph database to ordinary HR policy retrieval merely because this repository already has a graph subsystem.
 
-1. Set `DATABASE_URL` in the shell to the local PostgreSQL connection string. Never paste the password into a committed file or command transcript.
-2. Install the locked Python dependencies with `cd apps/context-engine && uv sync --frozen`.
-3. Run `npm run db:migrate -w @local-ai/api`. The existing migration runner applies additive migrations 0006–0008 and checks migration checksums. A one-entry compatibility checksum recognizes the already-applied pre-split Phase 5 draft of 0006; 0007 reconciles that schema. Do not edit applied migration SQL.
-4. Initialize and scan the repository with the existing CLI, writing the artifact outside the scanned repository if practical.
-5. Supply stable tenant/environment UUIDs to the index command:
+<a id="scanner"></a>
+## Initialize and scan safely
+
+From the platform checkout:
 
 ```sh
-npm run context -- init --root /path/to/project --name my-project
-npm run context -- scan --root /path/to/project --output /tmp/my-project-scan.json
-npm run context -- index --artifact /tmp/my-project-scan.json --root /path/to/project --tenant-id YOUR_TENANT_UUID --environment-id YOUR_ENVIRONMENT_UUID --environment-name local
-npm run context -- storage search --tenant-id YOUR_TENANT_UUID --project-id YOUR_PROJECT_UUID --environment-id YOUR_ENVIRONMENT_UUID --query "ChatService" --limit 10
+npm ci
+cd apps/context-engine
+uv sync --frozen --python 3.12
+cd ../..
+npm run build -w @local-ai/context-cli
+npm run context -- init --root /absolute/path/to/approved-project --name my-project
+npm run context -- scan --root /absolute/path/to/approved-project --output /private/tmp/my-project-scan.json
 ```
 
-The tenant and environment IDs must be valid UUIDs. Project ID is taken from the graph's `.context-platform.json` source. Use the same IDs on later indexing runs. `--root` makes the CLI re-scan the approved root and compare its graph with the artifact before it persists chunks; it never trusts chunk text copied from an edited artifact. Omit `--root` only for legacy graph-only artifacts with no chunks. The CLI prints status, scope, generation/node/edge/chunk counts and manifest hash, not chunk contents.
+Use a fresh output path whose parent exists. Init refuses to overwrite `.context-platform.json`; preserving its local project UUID keeps identities stable. Output is private mode 0600, schema version 4 with graph version 1. Exit 0 means complete discovery, 1 a root/config/output failure, 2 partial work caused by failures/limits. Complete does not mean all languages were analyzed or no secret exists.
 
-`storage search` pins the environment's current published generation, runs parameterized name/attribute matching and PostgreSQL full-text plus literal-substring search across chunks, and returns source paths, hashes, line ranges, chunk text and up to five one-hop graph relationships per graph result. Results are local source excerpts. Ordinal rank is only ordering, not a relevance probability. The response explicitly reports `semantic_search: not_implemented`; embeddings and semantic retrieval remain open. There is no shared API or chat prompt compilation yet.
+The TypeScript CLI launches the shared Python core with an argument array, not a shell executing repository scripts. `CONTEXT_ENGINE_PYTHON` is a trusted operator interpreter setting, not controlled by project config. A scan requires no FastAPI server, production database credentials, dependency installation in the scanned project or network fetch.
 
-For recovery, rollback and removal:
+Scanner code reads via descriptor-relative no-follow operations and checks regular files/concurrent changes. It rejects symlinks, VCS/dependency/build output, `.env` variants, credential/key/certificate paths, special files and unsupported paths. Configurable exact-basename exclusions are data; `.gitignore` execution/interpretation is not implemented. Archives are not unpacked. ASCII-safe relative paths are the supported subset.
+
+Whole-file secret-pattern/entropy screening precedes eligible artifacts/chunks. A finding excludes the file rather than claiming reliable inline redaction. Findings retain safe rule/location, not matched values. Accepted chunks are private, unredacted source excerpts: false negatives and false positives remain possible.
+
+| Bound | Current local baseline | Reason / limitation |
+| --- | --- | --- |
+| File/read/traversal | 1 MiB file, 50 MiB accepted reads, 20k entries, depth 24, 30 seconds traversal | Bounds growth; traversal time check is cooperative, not a hard stalled-filesystem deadline |
+| Source chunks | 4k characters, 300-character overlap, 20k chunks, 16 MiB total | Preserve bounded evidence; boundary loss/duplicates remain; these are not tokens |
+| Static facts | 5k per file, 50k per project | Caps artifacts; coverage becomes partial rather than silently complete |
+| Native parsing | Spawned worker, 2-second per-file deadline, recycle after 12 files | Contains crash/hang; no OS memory quota for the project analyzer worker |
+| Graph/query | Bounded graph and artifact, traversal depth at most 4 / 200 nodes | Stops fanout; not measured large-repository capacity |
+
+A live working tree is not an atomic Git snapshot. Use an approved fixed checkout/revision for reproducibility. Do not increase all caps to “support enterprise” without isolation, cancellation, admission and measurements.
+
+<a id="analyzers"></a>
+## What static analysis establishes
+
+[analyzers.py](../../apps/context-engine/analyzers.py) parses the screened bytes and emits source-hashed, 1-based inclusive ranges. Grammar versions are locked, avoiding on-demand grammar downloads. Tree-sitter 0.25 was retained after a recorded 0.26 traversal crash on a real TypeScript fixture; native workers constrain failure propagation.
+
+| Input | Established evidence | Not established |
+| --- | --- | --- |
+| Python/JS/TS/TSX | Declarations, imports/exports, decorators | Cross-file binding or runtime call graph |
+| Nest/Express/Fastify/FastAPI/Flask patterns | Supported literal route declarations with import evidence | Dynamic route values, middleware/auth reachability or deployment |
+| GraphQL | SDL and supported resolver declarations | Live resolver execution/schema completeness |
+| OpenAPI JSON/YAML | Local operations/schema names and ranges | External references, remote URLs or actual service correctness |
+| PostgreSQL DDL | Local table/column syntax | Executed migrations/live schema |
+| Documentation/manifests | Headings and dependency declarations | Truth of prose, runtime framework activity or safe executable setup |
+
+JSON duplicate keys and unsafe YAML aliases/duplicate keys/depth/nodes are rejected. Unsupported/malformed siblings leave explicit partial coverage; valid siblings can continue. Regex-only parsing is simpler but easily confuses comments/strings with declarations; executing builds/imports gives richer behavior at the unacceptable cost of executing untrusted input.
+
+<a id="graph"></a>
+## Inspect the local graph
 
 ```sh
-# Intentional failure experiment: leave one committed batch in an unpublished generation.
-npm run context -- index --artifact /tmp/my-project-scan.json --root /path/to/project --tenant-id TENANT_UUID --environment-id ENVIRONMENT_UUID --inject-interruption-after-checkpoints 1
-# Rerun without the injection flag to resume and publish.
-npm run context -- index --artifact /tmp/my-project-scan.json --root /path/to/project --tenant-id TENANT_UUID --environment-id ENVIRONMENT_UUID
-# Roll the head back to a previously published generation.
+npm run context -- graph find --artifact /private/tmp/my-project-scan.json --type dependency --name fastify
+npm run context -- graph traverse --artifact /private/tmp/my-project-scan.json --node-id NODE_UUID --depth 2 --limit 100
+```
+
+Use the real UUID returned by lookup. UUIDv5 identities derive from project/logical source/symbol identity rather than raw line numbers. Content/coverage changes produce a new generation; provenance remains tied to its hash/ranges. Duplicate declarations use deterministic ordinals, so adding an earlier duplicate can change later IDs. Renames and unresolved dynamic relationships are not magically stable.
+
+The graph describes extracted containment/declaration/import/dependency/table relationships. A nearby node is not automatically relevant and a route decorator is not proof of authorization. Bounded traversal, source checks and same-generation edges prevent unrestricted expansion; shared per-source access labels are still future work.
+
+<a id="storage"></a>
+## Persist, search and recover
+
+Configure the local `DATABASE_URL` privately; confirm target/backup and use the existing migration runner. Never ask the scanner for production database credentials. Migrations `0006`–`0008` define project generations/checkpoints/chunks; later CMS migrations are separate. Applied migration SQL is immutable.
+
+```sh
+npm run db:migrate -w @local-ai/api
+npm run context -- index --artifact /private/tmp/my-project-scan.json --root /absolute/path/to/approved-project --tenant-id TENANT_UUID --environment-id ENVIRONMENT_UUID --environment-name local
+npm run context -- storage search --tenant-id TENANT_UUID --project-id PROJECT_UUID --environment-id ENVIRONMENT_UUID --query "ChatService" --limit 10
+```
+
+Replace placeholders with stable valid UUIDs. Project ID comes from the initialized scan; tenant/environment are operator-supplied identifiers, not authenticated membership. `--root` re-scans and compares graph/chunk identity before persisting source text, so edited artifact chunks are not trusted. Legacy graph-only artifacts can omit root; do not infer that arbitrary chunk payloads may be uploaded.
+
+The store switches to the restricted NOLOGIN/NOBYPASSRLS `context_runtime` role and transaction-local scope, with composite FKs binding all endpoints. The local `platform` database owner can bypass RLS. This constrains storage mistakes; it does not make the CLI a multi-user authorization service.
+
+```mermaid
+flowchart TD
+    Scan[Screened scan and canonical manifest] --> Lock[Scoped session advisory lock]
+    Lock --> Build[Unpublished generation]
+    Build --> Batch[Commit payload and hash checkpoint per batch]
+    Batch --> Check[Verify persisted counts]
+    Check --> Publish[Atomic published state and head switch]
+    Batch --> Stop[Interruption leaves staged batches]
+    Stop --> Resume[Same manifest validates checkpoints and resumes]
+    Resume --> Check
+    Publish --> Read[Reader pins one published generation]
+```
+
+The index lock is held by the database session across 500-row batch transactions, with a bounded 30-second acquisition wait. A process crash releases its session lock; staged committed batches remain, invisible through the published head. Final publication is atomic, not every historical batch write. A failed transaction rolls back that transaction; it does not undo earlier committed checkpoints.
+
+Local retrieval uses a repeatable-read snapshot, explicit scope and pinned head across node/chunk/neighbor queries. It searches exact/prefix/substring graph names/attributes and full-text/literal source chunks, then up to five same-generation neighboring relations per result. It returns ordinal ranks/match types, not calibrated confidence. It explicitly labels semantic search unavailable. No head is a distinct `no_published_generation` state; database failure is not a successful empty result.
+
+Project semantic embeddings, source-label ACLs, authenticated shared APIs and deterministic context compilation remain incomplete. Do not confuse the working CMS PDF vector path with completed project retrieval.
+
+### Safe recovery procedures
+
+Only in an approved disposable project/database:
+
+```sh
+# Leave one committed staging checkpoint; confirm the previous published head remains.
+npm run context -- index --artifact /private/tmp/my-project-scan.json --root /absolute/path/to/approved-project --tenant-id TENANT_UUID --environment-id ENVIRONMENT_UUID --inject-interruption-after-checkpoints 1
+# Resume with the same inputs and no injection flag.
+npm run context -- index --artifact /private/tmp/my-project-scan.json --root /absolute/path/to/approved-project --tenant-id TENANT_UUID --environment-id ENVIRONMENT_UUID
+# Repoint to an existing valid published generation; this does not erase other data.
 npm run context -- storage rollback --tenant-id TENANT_UUID --project-id PROJECT_UUID --environment-id ENVIRONMENT_UUID --generation-id GENERATION_UUID
-# Permanently delete one environment and all of its generations; confirmation must exactly match its UUID.
-npm run context -- storage delete-environment --tenant-id TENANT_UUID --project-id PROJECT_UUID --environment-id ENVIRONMENT_UUID --confirm-environment-id ENVIRONMENT_UUID
 ```
 
-## PostgreSQL inspection
+Predict unchanged head after interruption, checkpoint resume on repeat, and one coherent generation after publication. Inspect scope/generation/counts and recover by resume or explicit rollback. Record behavior rather than assuming it. This does not prove relevance, production load or authenticated user isolation.
 
-Connect with pgAdmin at `http://127.0.0.1:5050` or with `psql` on port 5432, then run scoped queries. Replace the UUID literals with the values used by the CLI.
+`storage delete-environment` is permanent and requires exact `--confirm-environment-id`. It cascades the selected environment's generations/checkpoints/rows; use only an explicitly disposable target after review. It is not routine recovery. Retention/tombstones/audit automation remain open.
+
+Scoped metadata inspection:
 
 ```sql
--- Current generation for this project/environment
-SELECT h.tenant_id, h.project_id, h.environment_id, h.generation_id, h.updated_at,
-       g.status, g.node_count, g.edge_count, g.coverage, g.manifest_hash
-FROM context_platform.graph_heads AS h
-JOIN context_platform.graph_generations AS g
+SELECT h.generation_id, g.state, g.status, g.node_count, g.edge_count
+FROM context_platform.graph_heads h
+JOIN context_platform.graph_generations g
   USING (tenant_id, project_id, environment_id, generation_id)
-WHERE h.tenant_id = 'TENANT_UUID'
-  AND h.project_id = 'PROJECT_UUID'
-  AND h.environment_id = 'ENVIRONMENT_UUID';
-
--- Search exact node names in the pinned current generation
-SELECT n.node_type, n.name, n.node_id, n.attributes, n.provenance
-FROM context_platform.graph_heads AS h
-JOIN context_platform.graph_nodes AS n
-  USING (tenant_id, project_id, environment_id, generation_id)
-WHERE h.tenant_id = 'TENANT_UUID'
-  AND h.project_id = 'PROJECT_UUID'
-  AND h.environment_id = 'ENVIRONMENT_UUID'
-  AND n.name ILIKE '%Controller%'
-ORDER BY n.node_type, n.name
-LIMIT 100;
-
--- Inspect content saved for retrieval (keep this output private)
-SELECT c.relative_path, c.chunk_index, c.line_start, c.line_end, c.content_sha256, c.content
-FROM context_platform.context_chunks AS c
-JOIN context_platform.graph_heads AS h
-  USING (tenant_id, project_id, environment_id, generation_id)
-WHERE h.tenant_id = 'TENANT_UUID'
-  AND h.project_id = 'PROJECT_UUID'
-  AND h.environment_id = 'ENVIRONMENT_UUID'
-ORDER BY c.relative_path, c.chunk_index
-LIMIT 20;
-
--- Inspect generation history without mixing generations
-SELECT generation_id, status, node_count, edge_count, published_at
-FROM context_platform.graph_generations
-WHERE tenant_id = 'TENANT_UUID'
-  AND project_id = 'PROJECT_UUID'
-  AND environment_id = 'ENVIRONMENT_UUID'
-ORDER BY published_at DESC;
+WHERE h.tenant_id='TENANT_UUID' AND h.project_id='PROJECT_UUID'
+  AND h.environment_id='ENVIRONMENT_UUID';
 ```
 
-Every retrieval statement includes the full scope and current generation. A node or chunk row from an older generation is not part of the current result unless the head references that generation. PostgreSQL stores the approved scan's chunk excerpts; protect the database and pgAdmin like the source repository. Files rejected by the scanner have no chunks.
+Any content query must include full scope/generation and stay private. Repeated manifest, concurrency, interrupted-checkpoint resume, invalid edge FK, restricted-role isolation, rollback and deletion were exercised for Phase 5 in the dated journal. The later project lexical/chunk retrieval change originally recorded syntax-only verification, not complete runtime/ACL acceptance; applying its migration later does not validate all query behavior. No fresh experiment ran during this consolidation.
 
-## Publication and recovery flow
+<a id="hermes"></a>
+## Hermes: local read-only bridge, not the CMS agent
 
-```text
-scan and secret-screen -> chunk eligible text -> re-scan root at index time -> validate graph/chunk hashes -> canonical manifest hash
-    -> scoped runtime role + session advisory lock
-    -> insert generation -> commit source/chunk/node/edge batches with hash checkpoints
-    -> verify persisted counts -> mark published and switch graph_heads atomically
+The operator-selected `CONTEXT_PROJECT_ROOT` fixes one repository. `apps/context-engine/hermes_mcp.py` lazily scans and exposes `project_context_overview`, `search_project_context` and `find_project_symbols` over stdio. No TCP port or token prompt is needed. Its OS/filesystem access runs with the invoking user's privileges; do not expose unauthorized repositories to it.
+
+Check an existing local registration with:
+
+```sh
+hermes mcp list
+hermes mcp test project-context
 ```
 
-If a batch write fails before commit, that batch and checkpoint roll back while earlier committed batches remain staged and invisible through `graph_heads`. Rerun the same artifact to validate and resume those batches. If the client loses the final success response after commit, the retry returns `already_published`. A changed scan gets a new manifest and generation. Rollback changes only the head pointer; it does not mutate either generation. Environment deletion cascades to all generations, checkpoints and graph rows after exact UUID confirmation.
+The registration command points to the checkout's `.venv/bin/python` and MCP script. If the checkout/interpreter moves, update that trusted command/configuration and reload/restart the MCP process. These are installed-runtime procedures, not a claim registration is currently healthy.
 
-Partial scan coverage is persisted with `status=partial` and coverage counters. The local search returns that status; callers must treat results from partial generations as incomplete. The lexical/graph command returns facts from the graph and is not a natural-language answer or a compiled model prompt.
+**Why stdio:** smaller local surface than a new HTTP service or general shell tool. **Cost:** repeated scans per process, literal search misses paraphrases, no CMS role/object policy, no shared durable retrieval and no business writes. Browser installation does not wire Hermes into the PDF assistant or change Hermes' own model/memory configuration.
 
-## Failure experiment
+**Known provenance risk from source inspection:** `snapshot()` caches source metadata; `search()` reopens current text but emits the cached source hash. A changed file can therefore be paired with a stale hash. This has not been fixed or freshly reproduced here. Use a fixed checkout and restart/reload after changes, and do not claim coherent live revisions. A focused future fixture should change a file between snapshot/search and require rejection or consistent refresh.
 
-Use a disposable project and a non-production database:
+For an approved failure exercise, use a disposable root/process: predict safe error for unavailable root, invoke the tool, restore/restart and verify real evidence. For freshness, edit harmless fixture text, compare actual text/hash/version before and after reload. Do not rename a live user repository for testing. The original Hermes outage/freshness procedures were proposed, not recorded as executed.
 
-1. Index the same artifact twice and confirm only one generation exists for the manifest and both commands resolve the same head.
-2. Index two artifacts for one scope concurrently and confirm the advisory transaction lock serializes publication and the head references one committed generation.
-3. Use the bounded interruption flag after a committed batch, confirm the head did not move, rerun and confirm checkpoint resume.
-4. Change an edge endpoint to a nonexistent node or another scope and confirm validation or the composite foreign key rejects it.
-5. Confirm the `context_runtime` role cannot see another environment or update/delete graph nodes; the `platform` owner can bypass RLS.
-6. Roll back to an earlier published generation and confirm the head; delete the disposable environment and confirm its graph rows/checkpoints cascade away.
+The future shared `AgentContextProvider` must preserve Nest-derived identity, permissions, source provenance, budgets and audited tool constraints. No unrestricted shell, arbitrary URL or direct privileged database access should be added simply to call this an agent.
 
-Executed 2026-11-04: migrations applied to the existing database and a fresh temporary database; the fresh database was dropped afterward. A disposable graph indexed and re-indexed idempotently; an injected stop after one checkpoint resumed and published; two concurrent index calls converged on one generation; RLS hid an alternate environment and the runtime role lacked graph-node UPDATE/DELETE privileges; an invalid edge target was rejected with SQLSTATE 23503; head rollback and environment deletion succeeded. Load limits have not been measured.
+## What to measure before expanding
 
-## What remains to implement
-
-- Provision organization/project membership and authenticated identity before accepting remote/shared project requests.
-- Add database login/role provisioning per deployment; local migration provisions the NOLOGIN runtime group and the CLI switches into it.
-- Add a fencing-token lease if indexing moves to workers that can outlive the current database session lock.
-- Define retention, source tombstone and audit behavior before automatic garbage collection.
-- Complete retrieval with normalized source chunks, evaluated semantic/hybrid search, authorization labels and runtime isolation evidence.
-- Add a deterministic context compiler before injecting retrieved items into model prompts.
-- Keep browser chat and Hermes disconnected from this operator-only search until their identity and authorization boundaries are implemented.
-
-Read [ADR-016](../decisions/ADR-016-atomic-context-graph-generations.md) for the decision, alternatives, edge cases, scale considerations and interview questions.
+Measure filesystem/secret screening, parser CPU/memory, graph size/fanout, batch/WAL/index cost, query plans and lock waits. JSON/substring scans and graph memory can dominate before model inference exists. Add indexed predicates, batching, incremental analysis, ANN or isolated workers only for measured need. Worker leases/fencing become necessary if work can outlive the database session lock. The [decision register](../decisions/README.md) and [interview notes](../interview/README.md) explain how to defend these tradeoffs.

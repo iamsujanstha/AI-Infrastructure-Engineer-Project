@@ -20,6 +20,7 @@
     "express-rate-limit": "^8.3.0",
     "helmet": "^8.1.0",
     "ioredis": "^6.0.0",
+    "openid-client": "^6.8.9",
     "pg": "^8.16.3",
     "pino": "^10.1.0",
     "pino-http": "^11.0.0",

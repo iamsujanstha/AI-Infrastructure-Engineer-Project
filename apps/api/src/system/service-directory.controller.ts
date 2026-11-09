@@ -14,7 +14,7 @@ export class ServiceDirectoryController {
     description: 'Local-development catalog for the web UI, APIs, PostgreSQL/pgAdmin, Redis, MLX, and the Hermes stdio integration. It reports configured addresses, not live health. Credential values are omitted.',
   })
   @ApiResponse({ status: 200, description: 'Configured local service directory.', type: ServiceDirectoryResponseDto })
-  @ApiResponse({ status: 404, description: 'The service directory is disabled outside loopback development.' })
+  @ApiResponse({ status: 404, description: 'The service directory is disabled outside loopback or explicitly enabled local Docker development.' })
   getServices(): ServiceDirectoryResponseDto {
     return this.directory.getDirectory();
   }

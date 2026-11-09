@@ -30,6 +30,8 @@ async function bootstrap(): Promise<void> {
   app.use(requestIdMiddleware);
   app.use(pinoHttp({
     logger,
+    serializers: { req: (request: { id?: unknown; method?: unknown; url?: unknown }) => ({ id:request.id,method:request.method,
+      url:typeof request.url==='string' && request.url.startsWith('/api/v1/cms/oidc/callback') ? '/api/v1/cms/oidc/callback' : request.url }) },
     genReqId: (request) => request.id,
     customLogLevel: (_request, response, error) => {
       if (error) return 'error';
@@ -48,7 +50,7 @@ async function bootstrap(): Promise<void> {
     origin: config.get('CORS_ORIGINS', { infer: true }),
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-Id'],
-    credentials: false,
+    credentials: true,
     maxAge: 600,
   });
   app.use(rateLimit({
@@ -57,6 +59,10 @@ async function bootstrap(): Promise<void> {
     standardHeaders: 'draft-8',
     legacyHeaders: false,
     skip: (request) => request.path === '/health' || request.path.startsWith('/health/'),
+  }));
+  app.use('/api/v1/cms', rateLimit({
+    windowMs: 60_000, limit: 20, standardHeaders: 'draft-8', legacyHeaders: false,
+    skip: (request) => !['/login', '/setup', '/password','/oidc/start','/oidc/callback'].includes(request.path),
   }));
   app.setGlobalPrefix('api', {
     exclude: [
@@ -75,7 +81,7 @@ async function bootstrap(): Promise<void> {
     .setTitle('Local AI Platform API')
     .setDescription(
       'Local development API for chat, saved conversations, and dependency readiness. ' +
-      'Chat endpoints are restricted to configured browser origins on a loopback deployment; this origin check is not authentication.',
+      'Chat endpoints are restricted to configured browser origins in loopback or explicitly enabled local Docker development; this origin check is not authentication.',
     )
     .setVersion('1.0.0')
     .build();

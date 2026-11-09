@@ -6,7 +6,8 @@ import { LocalChatOriginGuard } from './local-chat-origin.guard';
 
 function createGuard(overrides: Partial<AppEnvironment> = {}) {
   const values = {
-    NODE_ENV: 'development', API_HOST: '127.0.0.1', CORS_ORIGINS: ['http://127.0.0.1:3000'], ...overrides,
+    NODE_ENV: 'development', API_HOST: '127.0.0.1', API_PORT: 4000, LOCAL_CHAT_CONTAINER_MODE: false,
+    CORS_ORIGINS: ['http://127.0.0.1:3000'], ...overrides,
   };
   const config = { get: (key: keyof typeof values) => values[key] } as unknown as ConfigService<AppEnvironment, true>;
   return new LocalChatOriginGuard(config);

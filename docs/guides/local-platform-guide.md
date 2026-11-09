@@ -1,89 +1,129 @@
-# Local Platform Guide: Tools, Data, Flows, and Roadmap
+# Local platform guide
 
-This guide explains what is running today, where its data lives, how to inspect it, and what to build next. It separates working behavior from schema and architecture that are only groundwork.
+Use this document to operate the company PDF assistant. Use [project-context operations](../context/storage-operations.md) for scanning code/Hermes, [architecture](../architecture/system.md) for contracts and permissions, and [interview notes](../interview/README.md) for deeper reasoning. Commands below are procedures, not evidence they ran during documentation cleanup.
 
-## Start with these distinctions
+<a id="pdf-policy-workspace"></a>
+## PDF policy workspace
 
-The word “memory” is used for different systems. They do not share storage automatically.
+The homepage and `/cms` support authenticated local accounts. The first operator creates the organization/admin; no default password or real company account was seeded. Keep the pilot local and use synthetic data until deployment and company acceptance are reviewed.
 
-| Data | Stored in | What it does here |
-| --- | --- | --- |
-| Browser chat transcript | PostgreSQL: `conversations`, `messages`, `message_parts` | The local web chat reloads saved conversations and sends recent completed turns to MLX. This is app conversation history, not Hermes memory. |
-| Platform memory records | PostgreSQL: `memories`, `memory_links` | The schema exists, but the product does not yet have an implemented memory write/retrieval workflow. |
-| Project source graph | Local scanner output and the Hermes MCP process’s in-memory scan snapshot | Represents analyzed files/symbols with source paths and line ranges. The current graph is not a durable shared index. |
-| Hermes conversation history | SQLite: `~/.hermes/state.db` | Hermes saves its own sessions and message history. It is independent from the browser app’s PostgreSQL conversations. |
-| Hermes curated memory | Files: `~/.hermes/memories/MEMORY.md` and `USER.md` | Small notes/profile that Hermes can carry between sessions. They are not a copy of every conversation. |
-| Model context window | Sent with an individual inference request | Bounded prompt input for one model call. It is not persistent storage. |
+1. Create employees with deliberate roles after first-admin setup.
+2. Upload a **Company policy** PDF and choose its audience. The filename supplies the title; no manual context/chunk/embedding fields are needed.
+3. For a personal PDF, select **One employee · salary only** or **One employee · leave record**, then its employee owner. These are permission settings, not retyped content. Split bulk/mixed files first; never classify a personal record as an all-employee policy.
+4. Ask using **Uploaded PDFs**. Inspect original quotations, owner/category, PDF page and extracted-line references. No evidence produces not-found; a failed dependency remains an error.
+5. Archive superseded documents explicitly. Uploading changed bytes does not automatically retire the old policy or establish which version applies.
 
-The current local Hermes tool server only reads screened project files and graph metadata. It does not send browser chat messages to Hermes or write messages to Hermes memory. Hermes session history and curated memory are separate features; see the [official session guide](https://hermes-agent.nousresearch.com/docs/user-guide/sessions) and [memory guide](https://hermes-agent.nousresearch.com/docs/user-guide/features/memory).
+PDF facts are dated snapshots. “Ten days remaining on 1 October” does not establish today's remaining leave. The optional structured salary/leave workflows use separate authoritative tables and transactions. Upload does not update those records or approve leave. The employee selector controls structured record lookups, not the current all-permitted-document PDF search; HR must verify citation ownership.
 
-## What is implemented today
-
-| Component | Technology | Current role and limit |
-| --- | --- | --- |
-| Web UI | Next.js, React, Tailwind CSS | Local model chat, saved conversation selection, Markdown response rendering. The chat is not yet grounded in project sources. |
-| API | NestJS, TypeScript | Validates local chat requests, enforces a prompt budget, persists conversation turns, and calls the replaceable inference-provider interface. The local owner is server-defined; this is not login/authentication. |
-| Relational store | PostgreSQL 17 with `pg` and checked-in SQL migrations | Durable application records and conversation text. One named Docker volume preserves data across normal container restarts. |
-| Vector extension | pgvector inside PostgreSQL | The extension and dimension-aware `embeddings` table exist. There is no implemented project embedding/retrieval workflow or ANN vector index yet. It is not a separate database server. |
-| Context engine | FastAPI, Python 3.12, Tree-sitter analyzers | Runtime and authenticated health endpoints exist. Repository analysis currently runs through the local CLI/MCP integration; the context engine does not expose a project search API yet. |
-| Context CLI | TypeScript launcher + Python scanner/analyzers | Scans a selected checkout, screens likely secrets, creates versioned facts/graph, and queries a saved local artifact. |
-| Local inference | MLX-LM on Apple Silicon | Separate host process, default port 8080. The browser chat sends raw conversation context; it does not retrieve project files. |
-| Hermes integration | Hermes Agent + local stdio MCP server | Hermes can call three read-only project-context tools. Stdio means there is no MCP port to visit. |
-| Redis | Redis 7, optional legacy Compose profile | Health/persistence scaffold only for this project flow; chat and context retrieval do not currently depend on a Redis queue. |
-
-The distinction between “schema exists” and “feature works” matters. For example, `memories`, `documents`, `document_chunks`, and `embeddings` are database tables; that alone does not mean the UI writes memories or searches vectors.
-
-## Ports and addresses
-
-| Service | Local address | How to use it |
-| --- | --- | --- |
-| Web app | [http://127.0.0.1:3000](http://127.0.0.1:3000) | Open this in the browser. |
-| NestJS API | `http://127.0.0.1:4000` | API and liveness/readiness routes; interactive OpenAPI reference at `/docs`, JSON at `/docs/openapi.json`. |
-| PostgreSQL | `127.0.0.1:5432` | Connect with `psql`, DBeaver, TablePlus, or pgAdmin. Published on loopback only. |
-| pgAdmin | [http://127.0.0.1:5050](http://127.0.0.1:5050) | Browser UI for PostgreSQL. Sign-in and connection settings come from `.env`; the service directory never returns passwords. |
-| FastAPI context engine | `http://127.0.0.1:8000` | OpenAPI reference at `/docs`, JSON at `/openapi.json`; `/health` and authenticated `/internal/health`; no project retrieval endpoint yet. |
-| Redis (optional) | `127.0.0.1:6379` | Only when started with the `legacy` Compose profile. |
-| MLX-LM | `http://127.0.0.1:8080` | Host-run inference server; `/v1/models` shows the model IDs it currently serves. |
-| Hermes MCP server | No TCP port | Hermes starts `apps/context-engine/hermes_mcp.py` over local stdio. |
-
-The browser uses `127.0.0.1` by default. Keep the same hostname in the browser and API configuration; `localhost` and `127.0.0.1` are different browser origins.
+The [role matrix](../architecture/system.md#authorization) applies before listing, lexical/vector selection and cached-source reload. An incorrectly classified PDF can still leak data to its chosen audience: extraction cannot reliably infer employee ownership or separate mixed personal facts.
 
 ## Start the local system
 
-From the repository root:
+### Prerequisites and network choice
+
+Use the Node version required by root `package.json`, npm workspaces, Docker/Compose and Python 3.12 with the checked-in `uv.lock`. Current context-engine packaging pins uv 0.13.7. MLX requires a compatible Apple Silicon macOS environment and a cached/explicitly prepared model; it stays outside the Linux computation container.
+
+Use one hostname consistently: `127.0.0.1` and `localhost` are different origins. Defaults are web 3000, API 4000, context engine 8000, MLX 8080, PostgreSQL 5432, pgAdmin 5050 and optional Redis 6379. Change configured ports deliberately if occupied; do not stop unrelated applications.
+
+Compose requires the existing external network named by `DOCKER_SHARED_NETWORK`. The example name is a placeholder. Inspect your actual network and choose either this project's optional dependencies or your existing shared services, avoiding duplicate `postgres`/`redis` aliases. Published loopback ports do not isolate container peers on the shared network.
+
+### Host web/API, containerized PDF computation
+
+For a **new installation only**:
 
 ```sh
 cp .env.example .env
 npm ci
-docker compose up -d postgres context-engine pgadmin
+```
+
+For an existing installation, preserve `.env` and add only missing settings from the example. Keep credentials uncommitted. Set `DOCKER_SHARED_NETWORK` to the chosen network. Host `DATABASE_URL` uses the host-published database address; container `DOCKER_DATABASE_URL` uses Docker DNS. Ensure `CONTEXT_ENGINE_TOKEN` for the host API equals the container's `DOCKER_CONTEXT_ENGINE_TOKEN`; both must be configured consistently. The service token is not an employee credential.
+
+When using this project's own database, start only the explicitly selected local dependencies:
+
+```sh
+docker compose --profile local-infra up -d postgres pgadmin
+docker compose build context-engine
+docker compose run --rm --no-deps context-engine python policy_compute.py --download-model
+docker compose up -d context-engine
+```
+
+The model-preparation command explicitly downloads public embedding weights into the dedicated volume. It sends no PDFs/questions. Ordinary computation is local-only and fails when weights are missing; it does not download on demand. Do not repeat downloads to fix a database or authorization failure.
+
+Before migrating an existing database, confirm the target and take a protected backup. Then:
+
+```sh
 npm run db:migrate -w @local-ai/api
 npm run dev
 ```
 
-The web/API processes run on the host. PostgreSQL and the context-engine container bind to loopback. Redis is optional:
-
-```sh
-docker compose --profile legacy up -d redis
-```
-
-For the scanner/graph CLI, install the locked Python environment once:
-
-```sh
-cd apps/context-engine
-uv sync --frozen --python 3.12
-cd ../..
-npm run build -w @local-ai/context-cli
-```
-
-For local MLX inference, install MLX-LM in a compatible Apple Silicon Python environment and start its host process in another terminal:
+In a separate compatible macOS MLX environment, with the chosen model already cached:
 
 ```sh
 HF_HUB_OFFLINE=1 mlx_lm.server --model mlx-community/Qwen3-8B-4bit
 ```
 
-The MLX server defaults to loopback port 8080. The model must already be cached for offline mode. Full MLX configuration and the CLI workflow are in [Local MLX inference](../infrastructure/mlx-inference.md).
+Open `http://127.0.0.1:3000`. UI/model discovery failure means a real dependency/configuration problem, not a request for a browser API token. Local account login still requires your own CMS credentials.
 
-Check running services and health:
+This Mac previously rejected the required native PDF worker memory cap. Use the Linux context-engine container for PDF uploads; there is no unbounded host fallback. The project scanner can still use its host Python environment independently.
+
+### Containerized web/API on shared infrastructure
+
+Use this variant when container packaging is needed, not in addition to duplicate host API/web processes:
+
+```sh
+cp .env.docker.example .env.docker
+# Edit the new file for your existing network, service DNS and private credentials.
+docker compose --env-file .env.docker build
+# Confirm target/backup first. This one-off command does not start the API server.
+docker compose --env-file .env.docker run --rm --no-deps api node dist/database/migrate.js
+docker compose --env-file .env.docker run --rm --no-deps context-engine python policy_compute.py --download-model
+docker compose --env-file .env.docker up -d
+```
+
+Preserve an existing `.env.docker`. Default app containers reuse existing database/Redis infrastructure; only opt into `local-infra` when needed. Add optional OIDC/cache/routing settings to the chosen environment file; the example is not proof they are configured.
+
+The API uses `0.0.0.0` **inside** its development container and an explicit `LOCAL_CHAT_CONTAINER_MODE` opt-in. The host port stays loopback-published; peers can still reach the API. MLX gateway mode permits the configured `host.docker.internal` development destination, but requires a host-reachable listener and expands its trust boundary. Prefer the host API variant if you cannot restrict that inference listener to trusted traffic. Do not expose MLX publicly to make Docker convenient.
+
+`NEXT_PUBLIC_API_BASE_URL` is compiled into the browser build; changing it requires rebuilding the web image. Never put server-side secrets in `NEXT_PUBLIC_*` variables.
+
+<a id="google-workspace-sign-in"></a>
+## Google Workspace sign-in
+
+**Implemented adapter; live organization login not yet configured/accepted.** Local password login remains available. A Workspace administrator must register the correct web client, audience and exact callback. Set values only in the ignored local configuration/secret store:
+
+```dotenv
+OIDC_ISSUER=https://accounts.google.com
+OIDC_ALLOWED_HOSTS=accounts.google.com,oauth2.googleapis.com,www.googleapis.com
+OIDC_GOOGLE_WORKSPACE_DOMAIN=your-verified-company-domain.example
+OIDC_CLIENT_ID=your-registered-web-client-id
+OIDC_CLIENT_SECRET=your-private-client-secret
+OIDC_REDIRECT_URI=http://127.0.0.1:4000/api/v1/cms/oidc/callback
+OIDC_WEB_ORIGIN=http://127.0.0.1:3000
+```
+
+These are placeholders, not working credentials. Restart API after configuration; ensure callback hostname matches web hostname and web Origin is allowed. Configuration validates this at startup. Never paste client secrets, auth codes or identity tokens into chat/logs.
+
+Provision each local account, then bind its verified `(issuer, sub)` through the admin identity control. Obtain the subject through organization-controlled provisioning or an independently validated identity process; do not trust an arbitrary subject provided by the person seeking access. There is no email auto-linking. Google's signed `hd` must match the configured domain; an account-choice hint/email suffix does not establish membership. Roles continue to come from current local account records. See the [protocol reference](https://developers.google.com/identity/openid-connect/openid-connect) and [claim meanings](https://developers.google.com/identity/openid-connect/reference).
+
+Login grants no Google Drive access and imports no company documents. Live acceptance must check a bound employee, unbound/wrong-domain account, expired/reused state and revoked local role. Protocol tests using signed synthetic tokens do not replace that organization test.
+
+## Configuration choices and limits
+
+| Setting / boundary | Use and reason | Drawback / caution |
+| --- | --- | --- |
+| `LEGACY_LOCAL_CHAT_ENABLED=false` | Keeps historical fixed-owner chat outside the CMS | Enabling it restores a non-isolated local development path; not a company feature |
+| `PEOPLE_DB_TIMEOUT_MS=5000` | Bounds CMS query/transaction waits | A timeout is not proof no commit occurred; reconcile state before retrying writes |
+| `POLICY_COMPUTE_TIMEOUT_MS=60000` | Bounds waiting for extraction/embeddings | Does not guarantee all downstream work stops at disconnect |
+| `POLICY_SEMANTIC_CACHE_ENABLED=false` | Prefer auditable exact policy reuse until corpus evaluation | Lower hit rate; similarity/fingerprint reuse can still confuse meaning if enabled |
+| `POLICY_SMALL_MODEL`, `POLICY_LARGE_MODEL` | Route only to IDs reported by the provider | Configuration alone loads no model; switching/resident memory may remove any gain |
+| `MLX_CONTEXT_WINDOW_TOKENS`, `MLX_MAX_OUTPUT_TOKENS` | Explicit input/output budget | Current byte/template estimate is not exact tokenizer accounting |
+| Qwen3 thinking disabled by default | Spend bounded evidence-selection output on the selection | This is task-specific; re-evaluate quality before using the choice for harder tasks |
+
+PDF upload caps: 5 MiB / 100 pages / 160k extracted characters / 200 passages. Scanned/image-only and encrypted files require conversion; OCR is not implemented. Text extraction can lose table order or separate a rule from its exception. Page references are useful; extracted line numbers are not coordinates in the visual PDF.
+
+The English BGE embedding profile includes model/tokenizer hashes and FastEmbed version. A new profile needs reindexing; same dimension does not mean compatible vectors. Test Nepali/Hindi material before promising multilingual retrieval.
+
+## Inspect real signals
 
 ```sh
 docker compose ps
@@ -94,252 +134,78 @@ curl -i http://127.0.0.1:8000/health
 curl -i http://127.0.0.1:8080/v1/models
 ```
 
-The API also has `/health/redis` and `/health/inference`. Health results are real checks; `503` means the corresponding dependency is unavailable or unconfigured. The context engine’s `/health` is liveness; `/internal/health` requires its bearer token. Neither is project search.
+Liveness means a process can answer; readiness checks a particular dependency. FastAPI liveness can be healthy while its embedding cache is missing. `/health/inference` requires its optional health URL configuration; an unconfigured probe is not proof MLX itself is broken. `/health/redis` can fail while the PDF flow works because Redis is optional.
 
-## Open the service directory and connect pgAdmin
+The `/services` catalog lists configured addresses, not health. `/system` shows actual dependency checks. Nest docs are `/docs` (JSON `/docs/openapi.json`); FastAPI docs are `/docs` (JSON `/openapi.json`). Protected CMS operations still require login/Origin; Swagger does not bypass policy.
 
-Open the formatted service directory at [http://127.0.0.1:3000/services](http://127.0.0.1:3000/services). It reads the NestJS endpoint `GET http://127.0.0.1:4000/api/v1/system/services` and presents browser links, API docs, TCP connection addresses, start commands, and the Hermes stdio entry as cards. Connection fields and commands can be copied. The raw JSON stays available for integrations, and the endpoint also appears under **System** in NestJS Swagger at `http://127.0.0.1:4000/docs`. The catalog reports configuration rather than claiming that services are healthy.
+Admins can load `/cms/rag/metrics` through the UI. Runs include upload and answer operations, real outcomes, model/profile, cache kind, source count and measured durations. Retrieval includes pre-inference preparation; inference is null for cache hits. Total is measured before some final persistence/delivery and is not full browser latency. No runs means median UNKNOWN, not a fabricated zero. These are not actual token bills, TTFT or complete trace spans.
 
-Open [pgAdmin](http://127.0.0.1:5050) and sign in with `PGADMIN_DEFAULT_EMAIL` and `PGADMIN_DEFAULT_PASSWORD` from the root `.env` file. When adding the PostgreSQL server, use a name such as `Local AI Platform`, host `postgres` (the Compose DNS name from inside pgAdmin), port `5432`, maintenance database `local_ai_platform`, username `platform`, and the matching `POSTGRES_PASSWORD`. From a desktop database client outside Compose, use host `127.0.0.1` instead. The service-directory response includes both the pgAdmin URL and the connection fields, but deliberately omits password values.
-
-## Follow one browser chat turn
-
-~~~mermaid
-sequenceDiagram
-    participant Browser as Next.js browser UI
-    participant API as NestJS chat API
-    participant DB as PostgreSQL
-    participant MLX as MLX-LM host server
-    Browser->>API: GET saved conversations / POST a turn
-    API->>DB: owner-scoped conversation and messages
-    API->>DB: persist user prompt + pending assistant row
-    API->>MLX: provider-neutral request with recent history and budget
-    MLX-->>API: assistant text
-    API->>DB: persist and finalize assistant response
-    API-->>Browser: saved user/assistant message records
-~~~
-
-The chat routes are under `/api/v1/chat`:
-
-- `GET /conversations`: list the local owner’s active chats.
-- `POST /conversations`: start a chat.
-- `GET /conversations/:id/messages`: restore recent messages.
-- `POST /conversations/:id/turns`: persist a user turn and generate its answer.
-- `GET /models`: ask the live inference provider which models are available.
-
-On a provider failure, the submitted prompt remains stored and the assistant message is marked failed. The model receives up to 49 completed previous user/assistant pairs plus the new prompt; the API applies its configured context budget. A new chat starts an independent history.
-
-The local browser flow uses a fixed server-side development owner ID so you do not enter a token. The loopback/origin guard is not authentication: other local processes can call the API. Do not expose these ports to another device or use this as a multi-user deployment.
-
-## Inspect PostgreSQL with psql or a database GUI
-
-### Connect
-
-The easiest connection does not expose a database password in your shell:
-
-```sh
-docker compose exec postgres psql -U platform -d local_ai_platform
-```
-
-For an inspection session, make the transaction read-only before running SQL and finish with `ROLLBACK;` (then `\q` to exit). Avoid update/delete statements while learning the schema.
-
-For DBeaver, TablePlus, or pgAdmin, use host `127.0.0.1`, port `5432`, database `local_ai_platform`, user `platform`, and the password from your local `.env`/Compose configuration. The checked-in Compose password is a development placeholder only; do not reuse it outside localhost.
-
-### Inspect normal tables and migration history
-
-Inside `psql`:
+For PostgreSQL, use the configured host address with a desktop client; pgAdmin on the shared network uses the service's DNS name. Credentials stay in your local configuration. Prefer metadata queries over dumping private content:
 
 ```sql
-\conninfo
-\dx
-\dt
-\d+ conversations
-\d+ messages
-\d+ message_parts
-\d+ embeddings
-
 SELECT migration_name, applied_at
-FROM _platform_schema_migrations
-ORDER BY migration_name;
+FROM _platform_schema_migrations ORDER BY migration_name;
+
+SELECT operation, outcome, cache_kind, source_count,
+       retrieval_ms, inference_ms, total_ms, created_at
+FROM people_cms.policy_runs
+WHERE organization_id = 'YOUR_ORGANIZATION_UUID'
+ORDER BY created_at DESC LIMIT 20;
+
+SELECT id, record_kind, audience, employee_id, active, embedding_profile
+FROM people_cms.documents
+WHERE organization_id = 'YOUR_ORGANIZATION_UUID'
+ORDER BY created_at DESC LIMIT 20;
 ```
 
-The `\d+` commands show columns, constraints, and indexes. The migration runner applies numbered SQL files from `apps/api/migrations`, records checksums in `_platform_schema_migrations`, and rejects edits to already-applied files. Add a new numbered migration for future schema changes; do not edit a migration that has already run.
+Replace placeholder UUIDs locally. Database-owner queries bypass the application's employee restrictions; do not hand pgAdmin access to normal employees as a substitute for the CMS. [Migration runner](../../apps/api/src/database/migration-runner.ts) owns ordered/checksummed transactional DDL. It does not support `CREATE INDEX CONCURRENTLY` inside its current per-file transaction mode; design a separate mode before using such DDL.
 
-### Inspect saved app conversations
+## Failure and recovery exercises
 
-The local web app owner is created by the API as needed. This query lists its conversations without printing message content:
+These are procedures for isolated synthetic infrastructure; do not stop the main company/shared service. Each exercise has a narrow claim.
 
-```sql
-SELECT c.id, c.title, c.status, c.created_at, c.last_message_at,
-       count(m.id) AS message_count
-FROM conversations AS c
-LEFT JOIN messages AS m
-  ON m.conversation_id = c.id AND m.owner_user_id = c.owner_user_id
-WHERE c.owner_user_id = '00000000-0000-4000-8000-000000000001'::uuid
-  AND c.deleted_at IS NULL
-GROUP BY c.id
-ORDER BY c.last_message_at DESC;
-```
+| Exercise | Predict / act | Evidence / recovery | Does not prove |
+| --- | --- | --- | --- |
+| Cross-employee access | Upload personal owner A file; ask as B, HR and accountant | No B source/name exposure; HR allowed; accountant salary allowed, leave denied; archive fixture | Every future policy or classification is correct |
+| Unsupported question | Ask an unrelated question against fixed PDFs | Not-found instead of world-knowledge answer; restore question set | Perfect relevance/abstention on all language |
+| Compute timeout | Test API with 1,000 ms deadline; pause only its disposable compute container | Safe bounded 503, no answer; unpause in cleanup and recheck upload/question | Production failover, full cancellation or load capacity |
+| Archive/revocation | Cache an allowed policy answer; archive document or revoke test account | No reuse of withdrawn source; restore only synthetic permissions if needed | Physical erasure or recall of already delivered data |
+| Malformed/scan-only PDF | Upload synthetic broken/encrypted/image-only fixture | Rejection/no publication; use corrected text PDF | Malware immunity or table fidelity |
+| Budget/overload | Exceed fixed test context or contend for compute | Explicit error/busy rather than unlimited work; restore limits/workload | A measured production SLO |
 
-To inspect one transcript, substitute a conversation ID from the first query. This returns private prompts and model responses, so run it only on your machine:
+Recorded previous implementation checks: isolated compute pause returned 503 after 1,058 ms; after unpause browser upload indexed a PDF. Real synthetic salary PDF was accessible to its owner/HR/accountant and denied to another user. Current runtime health was not rechecked while consolidating these notes. Full dated evidence and limitations are in the [journal](../engineering-journal.md).
 
-```sql
-SELECT m.sequence, m.role, m.status, p.part_index, p.text_content, m.created_at
-FROM messages AS m
-LEFT JOIN message_parts AS p ON p.message_id = m.id
-WHERE m.conversation_id = '<conversation-uuid>'::uuid
-  AND m.owner_user_id = '00000000-0000-4000-8000-000000000001'::uuid
-ORDER BY m.sequence, p.part_index;
-```
-
-The browser chat currently has no per-chat delete/retention screen. Its records remain in PostgreSQL until an operator removes them or resets the local database. `docker compose down` keeps the data volume; `docker compose down -v` deletes the volumes and is destructive.
-
-### Inspect pgvector and embeddings
-
-pgvector is an extension in the same PostgreSQL database. Check whether it is installed and whether rows exist:
-
-```sql
-SELECT extname, extversion FROM pg_extension WHERE extname = 'vector';
-
-SELECT embedding_model, dimensions, count(*) AS rows
-FROM embeddings
-GROUP BY embedding_model, dimensions
-ORDER BY embedding_model, dimensions;
-
-SELECT indexname, indexdef
-FROM pg_indexes
-WHERE tablename = 'embeddings'
-ORDER BY indexname;
-```
-
-An embedding row has a model name, a dimension count, one `memory_id` or one `document_chunk_id`, and a `vector` value. Use the same model and exact dimension for a similarity query, and filter by the authorized owner/project before returning candidates. For example, this is the shape of a parameterized cosine-distance query; `$1` must be a real vector generated by the same embedding model and `$2`–`$4` must come from trusted scope/configuration:
-
-```sql
-PREPARE scoped_vector_search (vector, uuid, uuid, text, integer) AS
-SELECT e.id, e.memory_id, e.document_chunk_id,
-       e.embedding <=> $1 AS cosine_distance
-FROM embeddings AS e
-LEFT JOIN memories AS m
-  ON m.id = e.memory_id AND m.owner_user_id = e.owner_user_id
-LEFT JOIN document_chunks AS ch
-  ON ch.id = e.document_chunk_id AND ch.owner_user_id = e.owner_user_id
-LEFT JOIN documents AS d
-  ON d.id = ch.document_id AND d.owner_user_id = ch.owner_user_id
-WHERE e.owner_user_id = $2
-  AND COALESCE(m.project_id, d.project_id) = $3
-  AND e.embedding_model = $4
-  AND e.dimensions = vector_dims($1)
-  AND ((m.id IS NOT NULL AND m.status = 'active' AND m.deleted_at IS NULL)
-       OR (d.id IS NOT NULL AND d.deleted_at IS NULL))
-ORDER BY e.embedding <=> $1
-LIMIT $5;
-```
-
-This example demonstrates PostgreSQL syntax only. After preparing it, execute it with actual values:
-
-```sql
-EXECUTE scoped_vector_search(
-  '<full model-sized vector>'::vector,
-  '<owner-uuid>'::uuid,
-  '<project-uuid>'::uuid,
-  '<embedding-model-id>',
-  10
-);
-DEALLOCATE scoped_vector_search;
-```
-
-Replace every placeholder; the vector must have exactly the selected model’s dimension. The project does not yet generate project embeddings or expose vector retrieval, and no HNSW/IVFFlat index is defined in the current migration. A vector table and extension do not equal a working vector-search feature. Without an ANN index, similarity ordering scans candidate rows; choose the embedding model/dimension and measure quality/workload before adding one. Do not query all owners in a shared deployment.
-
-## Scan a codebase and inspect its graph
-
-The scanner is a local CLI, not the FastAPI server. It reads a chosen checkout without executing repository code, excludes credential-like files and directories, and produces source-backed facts. Start from a checkout you are allowed to inspect:
+Verification commands for an approved implementation phase:
 
 ```sh
-npm run context -- init --root "$PWD" --name ai-infrastructure-engineer-project
-mkdir -p .context-platform
-npm run context -- scan --root "$PWD" --output .context-platform/scan.json
-npm run db:migrate -w @local-ai/api
-npm run context -- index --artifact .context-platform/scan.json --root "$PWD" --tenant-id TENANT_UUID --environment-id ENVIRONMENT_UUID
-npm run context -- storage search --tenant-id TENANT_UUID --project-id "$(node -p 'require("./.context-platform.json").project_id')" --environment-id ENVIRONMENT_UUID --query "ChatService"
+npm run lint
+npm run typecheck
+npm run build
+# This integration suite deliberately resets only the named disposable database.
+PEOPLE_TEST_DATABASE_URL=postgresql://TEST_USER:TEST_PASSWORD@127.0.0.1:TEST_PORT/cms_test_local npm test
+cd apps/context-engine
+uv sync --frozen --python 3.12
+RUN_POLICY_EMBEDDING_TEST=1 .venv/bin/python -m pytest -q
+.venv/bin/python evaluate_policy_embeddings.py
 ```
 
-The initialization creates `.context-platform.json` in the selected root. The scan artifact includes discovery, analyzer results, graph nodes/edges, source hashes, line provenance and screened source chunks. At index time, `--root` causes a fresh scan; the CLI compares its graph with the supplied artifact and persists only the freshly generated chunks. Replace `TENANT_UUID` and `ENVIRONMENT_UUID` with stable UUIDs for this local scope. A `partial` status means some files were unsupported, failed, or hit a limit; it is not an empty or fully understood project. Scan artifacts and PostgreSQL chunks contain private repository excerpts. Avoid committing artifacts and protect pgAdmin/database access.
+Never point the CMS fixture suite at development/company data. It enforces a loopback `cms_test_*` target but you still choose the database. The embedding test needs prepared local model files. The evaluation script reads the checked-in [synthetic fixture](../evaluation/policy-embedding-fixtures.json); it is a component comparison, not company acceptance. Read [evaluation reasoning](../interview/README.md#evaluation) before interpreting scores. The separate `tests/foundation_failure.py` owns its own temporary processes/container; inspect its setup and safety bounds before execution.
 
-Example bounded graph queries:
+## Troubleshooting and data lifecycle
 
-```sh
-npm run context -- graph find \
-  --artifact .context-platform/scan.json \
-  --type class --name ChatService
-
-npm run context -- graph traverse \
-  --artifact .context-platform/scan.json \
-  --node-id '<node-uuid>' --depth 2 --limit 100
-```
-
-Graph-file queries remain available against artifacts. PostgreSQL `storage search` uses the current published generation to search facts and source chunks, returning paths, line ranges and excerpts with bounded graph neighbors. It is local lexical/graph retrieval; semantic embeddings, authorization labels and prompt compilation are not implemented, and the browser chat/Hermes MCP do not use this query. More detail: [scanner guide](../context/project-scanner.md), [storage guide](../context/storage-operations.md), [analyzer guide](../context/analyzers.md), and [graph guide](../architecture/context-graph.md).
-
-## Use Hermes with project context
-
-The local MCP registration is `project-context`. It launches `apps/context-engine/hermes_mcp.py` via stdio and sets a fixed `CONTEXT_PROJECT_ROOT`. It does not listen on port 8000 or 4000.
-
-Check it from a terminal:
-
-```sh
-hermes mcp list
-hermes mcp test project-context
-hermes memory status
-hermes sessions list
-```
-
-The project-context server currently exposes:
-
-1. `project_context_overview`: real scan/graph coverage.
-2. `search_project_context`: literal, case-insensitive search with short excerpts and source locations, limited to files accepted by the scanner’s screening rules.
-3. `find_project_symbols`: literal graph-name search with source paths and line ranges.
-
-Ask Hermes to use the project-context tools for a project-specific question and to include returned file paths/lines in its answer. If the server command or checkout path changes, update its registration with `hermes mcp add`; use `hermes mcp configure` to change which discovered tools are enabled. Then reload MCP tools or start a new Hermes session. The process keeps one in-memory snapshot; restart/reload it to rescan changed files.
-
-Hermes stores its full agent sessions separately from notes. The default-profile SQLite database is `~/.hermes/state.db`; use `hermes sessions list`, `hermes sessions stats`, `hermes --continue`, or a session export to inspect/manage history. To inspect the database locally without opening it for writes:
-
-```sh
-sqlite3 -readonly ~/.hermes/state.db '.tables'
-sqlite3 -readonly ~/.hermes/state.db 'SELECT id, source, title, started_at FROM sessions ORDER BY started_at DESC LIMIT 10;'
-```
-
-The `messages` table contains session message contents; querying it prints private prompts and tool results. Hermes curated notes live in `~/.hermes/memories/MEMORY.md` and `USER.md`; inspect those files locally only if needed. Run `hermes memory status` to see whether built-in curated memory and any external provider are enabled. The local MCP server does not write the app transcript into Hermes’ database or note files. Do not commit `.hermes/config.yaml`, memory files, SQLite files, or session exports; they may contain private data or credentials.
-
-## How to build the missing project-context capability
-
-The browser chat and the codebase-context pipeline are currently separate. Build the backend capability in this order before connecting it to the UI or external SDK:
-
-| Next phase | Problem it solves | Deliverable |
+| Symptom | First useful check | Recovery / limit |
 | --- | --- | --- |
-| 5 — durable context storage | Local graph snapshots disappear with the process and are not shared/reproducible | Additive `context_platform` schema, source/generation records, scoped access, checkpoints, duplicate/concurrent indexing behavior, deletion and rollback. Keep existing conversation tables separate. |
-| 6 — authorized retrieval | A graph alone cannot find the best source evidence for a natural-language question | Structured, lexical, semantic, graph, and hybrid retrieval. Apply owner/project/environment/permission filters before candidate ranking; record embedding failures. |
-| 7 — context compiler | Retrieval results can be too large or hard to verify in a model prompt | Deterministically budget selected evidence, reserve output capacity, include source citations and explain included/omitted items. Treat source text as untrusted. |
-| 8 — evaluation | “It seems useful” does not measure retrieval quality | Versioned judged queries; report Recall@K, Precision@K, MRR, irrelevant-result rate, and latency with honest missing labels. |
-| 9 — Atlas acceptance | A toy checkout cannot prove the actual integration works | Scan a verified Atlas revision, measure against reviewed source expectations, and report gaps without exposing secrets. |
-| 10 — production agent/FDE integration | Hermes’s current stdio bridge is local, lexical, and not tenant-authorized | Add an authenticated application-owned context provider/API and thin SDK/MCP adapter only after storage, retrieval, compiler, and evaluation gates pass. |
+| Browser cannot reach API | Hostname, build-time API URL, Origin, port and real API liveness | Correct exact config/restart owning process; do not broaden CORS to `*` |
+| Upload 403 | Current session/admin role and local-mode guard | Sign in to permitted account; file text cannot grant admin |
+| Upload 422 | Text extractability, encryption/active content, size/pages, credential pattern | Convert/review file; never remove privacy checks just to accept it |
+| Upload/answer 503 | Compute container/cache, MLX, DB readiness and bounded timeout | Restore correct dependency; no cloud fallback |
+| 429 busy | One active PDF/embedding computation and HTTP limits | Retry after work drains; investigate workload before increasing parallelism |
+| Valid citation, wrong answer | Owner/date/category, source wording, candidate coverage and selector | Correct document/classification; improve judged retrieval before adding a larger model |
+| Old policy still appears | Superseded document still active or ambiguous applicability | Archive intentionally; do not assume latest filename wins |
+| Google button absent | OIDC issuer/client configuration | Configure registered provider; do not invent credentials |
 
-For each phase, define the contract and failure/recovery experiment first, then implement backend behavior, tests, observability, and documentation, and only then expose it in the UI. The detailed acceptance plan is in [system architecture](../architecture/system.md), [API contract](../architecture/context-api.md), and [threat model](../security/threat-model.md).
+Original PDF bytes are not retained by this feature. Extracted text, vectors, query-derived cache vectors/hashes, browser/inference memory, audit metadata and backups still have privacy implications. Archive excludes future document use and advances policy revision; it is not physical deletion. Expired cache cleanup happens on writes, not an independent retention scheduler. Define access, encryption, deletion coverage and backup expiration before real company use.
 
-## Quick troubleshooting
+Normal container shutdown preserves named volumes. Removing volumes is destructive and is not a routine recovery step. A validated backup listing proves archive readability, not a successful restore: rehearse restore into a separate database and verify schema/data before trusting recovery.
 
-| Symptom | First checks |
-| --- | --- |
-| Web page cannot connect | `docker compose ps`; API `/health`; check the dev server is listening on 3000/4000 and `.env` uses the same browser hostname. |
-| Chat history cannot load | API `/health/database`; confirm migrations are applied with `_platform_schema_migrations`; inspect API logs. |
-| Model list empty/request times out | `curl http://127.0.0.1:8080/v1/models`; verify MLX is running, selected model matches a served ID, and local budget/timeouts are configured. |
-| Redis health is red | Redis is optional for current chat/context work. Start the legacy profile only if you are exercising that dependency. |
-| Hermes cannot find project tools | `hermes mcp test project-context`; verify the configured Python path and `CONTEXT_PROJECT_ROOT`; restart/reload MCP after config changes. |
-| Hermes results look stale | Restart/reload the MCP process; it holds its scan snapshot for its lifetime. |
-| Vector extension/table query fails | Run `npm run db:migrate -w @local-ai/api`, check `_platform_schema_migrations`, then inspect `\dx` and `\d+ embeddings`. Do not edit applied migrations. |
-
-## Further reading
-
-- [Local development setup](../infrastructure/local-development.md)
-- [PostgreSQL model and migrations](../database/data-model.md)
-- [Local MLX inference](../infrastructure/mlx-inference.md)
-- [Hermes MCP integration](../integrations/hermes-mcp.md)
-- [Engineering journal](../engineering-journal.md)
+Legacy general chat has separate stored transcripts; pasted-reference mode is request-only. Both are developer-only, disabled by default, and do not acquire CMS identity simply by enabling a flag. Hermes session history and curated memory are separate again.

@@ -1,0 +1,17 @@
+{
+  "version": "synthetic-policy-embedding-v1",
+  "purpose": "Component retrieval evaluation only; not company policy or end-to-end answer acceptance.",
+  "documents": [
+    {"id":"leave","audience":"all","text":"Synthetic fixture. Permanent employees can request twelve days of paid annual vacation each calendar year."},
+    {"id":"remote","audience":"all","text":"Synthetic fixture. Working from home requires prior approval from the employee's manager."},
+    {"id":"expense","audience":"accountant","text":"Synthetic fixture. Expense reimbursement requires a receipt submitted within thirty days."},
+    {"id":"private","audience":"hr","text":"Synthetic private orchid canary. Restricted personnel compensation documentation is available only to human resources."}
+  ],
+  "queries": [
+    {"id":"q1","role":"user","question":"How much paid time off can permanent staff request?","relevant":["leave"]},
+    {"id":"q2","role":"user","question":"Who must authorize home working?","relevant":["remote"]},
+    {"id":"q3","role":"accountant","question":"What evidence is needed to get expenses paid back?","relevant":["expense"]},
+    {"id":"q4","role":"hr","question":"Who can access restricted personnel compensation material?","relevant":["private"]},
+    {"id":"q5","role":"user","question":"Show the private orchid compensation documentation.","relevant":[],"unanswerable":true}
+  ]
+}

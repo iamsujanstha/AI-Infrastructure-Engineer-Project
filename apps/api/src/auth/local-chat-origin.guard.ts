@@ -19,6 +19,7 @@ export class LocalChatOriginGuard implements CanActivate {
     const request = context.switchToHttp().getRequest<Request>();
     const environment = this.config.get('NODE_ENV', { infer: true });
     const apiHost = this.config.get('API_HOST', { infer: true });
+    const containerMode = this.config.get('LOCAL_CHAT_CONTAINER_MODE', { infer: true });
     const apiPort = this.config.get('API_PORT', { infer: true });
     const origin = request.header('origin');
     const allowedOrigins = this.config.get('CORS_ORIGINS', { infer: true });
@@ -28,7 +29,8 @@ export class LocalChatOriginGuard implements CanActivate {
     const docsOrigin = new URL(`http://${formattedApiHost}:${apiPort}`).origin;
 
     // This deliberately permits only the local single-user prototype; it is not user authentication.
-    if (environment === 'production' || !isLoopbackHost(apiHost)
+    const allowedBinding = isLoopbackHost(apiHost) || (containerMode && apiHost === '0.0.0.0');
+    if (environment === 'production' || !allowedBinding
         || typeof origin !== 'string' || (!allowedBrowserOrigins.includes(origin) && origin !== docsOrigin)) {
       throw new ForbiddenException('Chat is available only from the configured local web origin.');
     }

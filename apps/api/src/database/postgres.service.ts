@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import type { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg';
 import type { AppEnvironment } from '../config/environment';
 import { createPostgresPool } from './pool';
+import { deadlineQuery } from './query-deadline';
 
 @Injectable()
 export class PostgresService implements OnModuleDestroy {
@@ -28,21 +29,22 @@ export class PostgresService implements OnModuleDestroy {
   async query<T extends QueryResultRow = QueryResultRow>(
     text: string,
     values?: readonly unknown[],
+    timeoutMs?: number,
   ): Promise<QueryResult<T>> {
-    return this.pool.query<T>(text, values as unknown[] | undefined);
+    return this.pool.query<T>(deadlineQuery(text, values, timeoutMs));
   }
 
-  async withTransaction<T>(work: (client: PoolClient) => Promise<T>): Promise<T> {
+  async withTransaction<T>(work: (client: PoolClient) => Promise<T>, timeoutMs?: number): Promise<T> {
     const client = await this.pool.connect();
     let clientReleased = false;
     try {
-      await client.query('BEGIN');
+      await client.query(deadlineQuery('BEGIN', undefined, timeoutMs));
       const result = await work(client);
-      await client.query('COMMIT');
+      await client.query(deadlineQuery('COMMIT', undefined, timeoutMs));
       return result;
     } catch (error) {
       try {
-        await client.query('ROLLBACK');
+        await client.query(deadlineQuery('ROLLBACK', undefined, timeoutMs));
       } catch {
         client.release(error instanceof Error ? error : new Error('Transaction rollback failed'));
         clientReleased = true;

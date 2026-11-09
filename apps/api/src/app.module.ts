@@ -5,9 +5,10 @@ import { HealthModule } from './health/health.module';
 import { ConversationModule } from './conversations/conversation.module';
 import { ChatModule } from './chat/chat.module';
 import { SystemModule } from './system/system.module';
+import { PeopleModule } from './people/people.module';
 
 @Module({
-  imports: [ConfigurationModule, HealthModule, ConversationModule, ChatModule, SystemModule],
+  imports: [ConfigurationModule, HealthModule, ConversationModule, ChatModule, SystemModule, PeopleModule],
   controllers: [AppController],
 })
 export class AppModule {}

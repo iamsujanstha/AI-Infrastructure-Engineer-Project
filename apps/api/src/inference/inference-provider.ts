@@ -8,6 +8,7 @@ export interface InferenceCompletionInput {
   requestId: string;
   messages: readonly InferenceMessage[];
   maxOutputTokens: number;
+  temperature?: number;
 }
 
 export interface InferenceProvider {

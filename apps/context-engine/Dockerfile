@@ -1,4 +1,4 @@
-FROM ghcr.io/astral-sh/uv:0.9.7 AS uv
+FROM ghcr.io/astral-sh/uv:0.13.7 AS uv
 FROM python:3.12-slim AS builder
 COPY --from=uv /uv /usr/local/bin/uv
 WORKDIR /app
@@ -9,11 +9,13 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 FROM python:3.12-slim AS runtime
+RUN apt-get update && apt-get install -y --no-install-recommends libstdc++6 libgomp1 && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=builder /app/.venv /app/.venv
-COPY app.py scanner.py analyzers.py analysis_worker.py graph.py local_cli.py storage.py ./
+COPY app.py scanner.py analyzers.py analysis_worker.py graph.py local_cli.py retrieval.py storage.py policy_compute.py policy_pdf_worker.py ./
+RUN mkdir -p /app/.cache/policy-embeddings && chown -R 10001:10001 /app/.cache
 RUN useradd --uid 10001 --create-home engine
 USER engine
 EXPOSE 8000
-CMD ["/app/.venv/bin/uvicorn", "app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]
+CMD ["/app/.venv/bin/uvicorn", "app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--no-access-log", "--limit-concurrency", "8"]
 

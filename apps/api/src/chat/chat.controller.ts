@@ -1,6 +1,7 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Inject, Param, Post, Req, UseGuards } from '@nestjs/common';
 import type { Request } from 'express';
 import { LocalChatOriginGuard } from '../auth/local-chat-origin.guard';
+import { LegacyLocalChatGuard } from '../auth/legacy-local-chat.guard';
 import { ApiBody, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { ChatService } from './chat.service';
 import { LocalConversationChatService } from './local-conversation-chat.service';
@@ -17,7 +18,7 @@ import {
 } from './chat.openapi';
 
 @Controller({ path: 'chat', version: '1' })
-@UseGuards(LocalChatOriginGuard)
+@UseGuards(LocalChatOriginGuard,LegacyLocalChatGuard)
 @ApiTags('Chat')
 export class ChatController {
   constructor(

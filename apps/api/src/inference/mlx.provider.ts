@@ -59,6 +59,7 @@ export class MlxProvider implements InferenceProvider {
       messages: input.messages satisfies readonly InferenceMessage[],
       max_tokens: input.maxOutputTokens,
       stream: false,
+      ...(input.temperature===undefined?{}:{temperature:input.temperature}),
     };
     // Qwen3 defaults to spending the output budget on hidden reasoning before its user-facing answer.
     if (/qwen3/i.test(input.model) && !this.config.get('MLX_QWEN3_ENABLE_THINKING', { infer: true })) {

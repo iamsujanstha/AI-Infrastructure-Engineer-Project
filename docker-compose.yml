@@ -1,5 +1,71 @@
 services:
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    environment:
+      NODE_ENV: development
+      API_HOST: 0.0.0.0
+      API_PORT: 4000
+      LOCAL_CHAT_CONTAINER_MODE: "true"
+      DATABASE_URL: ${DOCKER_DATABASE_URL:-postgresql://platform:platform_dev_only@postgres:5432/local_ai_platform}
+      REDIS_URL: ${DOCKER_REDIS_URL:-redis://redis:6379}
+      CORS_ORIGINS: ${DOCKER_CORS_ORIGINS:-http://127.0.0.1:3000,http://localhost:3000,http://127.0.0.1:4000,http://localhost:4000}
+      CONTEXT_ENGINE_URL: http://context-engine:8000
+      CONTEXT_ENGINE_PUBLIC_URL: http://127.0.0.1:8000
+      CONTEXT_ENGINE_TOKEN: ${DOCKER_CONTEXT_ENGINE_TOKEN:-context-engine-local-dev-token-change-before-use-32}
+      POLICY_COMPUTE_TIMEOUT_MS: ${POLICY_COMPUTE_TIMEOUT_MS:-60000}
+      POLICY_SMALL_MODEL: ${POLICY_SMALL_MODEL:-}
+      POLICY_LARGE_MODEL: ${POLICY_LARGE_MODEL:-}
+      POLICY_SEMANTIC_CACHE_ENABLED: ${POLICY_SEMANTIC_CACHE_ENABLED:-false}
+      OIDC_GOOGLE_WORKSPACE_DOMAIN: ${OIDC_GOOGLE_WORKSPACE_DOMAIN:-}
+      OIDC_ISSUER: ${OIDC_ISSUER:-}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+      OIDC_ALLOWED_HOSTS: ${OIDC_ALLOWED_HOSTS:-}
+      OIDC_REDIRECT_URI: ${OIDC_REDIRECT_URI:-http://127.0.0.1:4000/api/v1/cms/oidc/callback}
+      OIDC_WEB_ORIGIN: ${OIDC_WEB_ORIGIN:-http://127.0.0.1:3000}
+      MLX_BASE_URL: ${DOCKER_MLX_BASE_URL:-http://host.docker.internal:8080}
+      MLX_ALLOW_HOST_GATEWAY: "true"
+      PGADMIN_PORT: ${PGADMIN_PORT:-5050}
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-admin@localhost.com}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:4000:4000"
+    depends_on:
+      context-engine:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+    networks:
+      - shared-infrastructure
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://127.0.0.1:4000}
+    ports:
+      - "127.0.0.1:3000:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+    networks:
+      - shared-infrastructure
+
   postgres:
+    profiles: [local-infra]
     image: pgvector/pgvector:pg17
     environment:
       POSTGRES_DB: local_ai_platform
@@ -16,8 +82,11 @@ services:
       retries: 10
       start_period: 5s
     restart: unless-stopped
+    networks:
+      - shared-infrastructure
 
   pgadmin:
+    profiles: [local-infra]
     image: dpage/pgadmin4:9.19.0
     environment:
       PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-admin@localhost.com}
@@ -30,12 +99,20 @@ services:
       postgres:
         condition: service_healthy
     restart: unless-stopped
+    networks:
+      - shared-infrastructure
 
   context-engine:
     build: ./apps/context-engine
+    mem_limit: 1g
+    cpus: 2.0
     environment:
       NODE_ENV: ${NODE_ENV:-development}
-      CONTEXT_ENGINE_TOKEN: ${CONTEXT_ENGINE_TOKEN:-context-engine-local-dev-token-change-before-use-32}
+      CONTEXT_ENGINE_TOKEN: ${DOCKER_CONTEXT_ENGINE_TOKEN:-context-engine-local-dev-token-change-before-use-32}
+      HF_HUB_DISABLE_TELEMETRY: "1"
+      POLICY_EMBEDDING_CACHE: /app/.cache/policy-embeddings
+    volumes:
+      - policy_embeddings:/app/.cache/policy-embeddings
     ports:
       - "127.0.0.1:8000:8000"
     healthcheck:
@@ -44,9 +121,11 @@ services:
       timeout: 3s
       retries: 5
     restart: unless-stopped
+    networks:
+      - shared-infrastructure
 
   redis:
-    profiles: [legacy]
+    profiles: [legacy, local-infra]
     image: redis:7-alpine
     command: ["redis-server", "--appendonly", "yes"]
     ports:
@@ -60,8 +139,16 @@ services:
       retries: 10
       start_period: 5s
     restart: unless-stopped
+    networks:
+      - shared-infrastructure
 
 volumes:
+  policy_embeddings:
   postgres_data:
   pgadmin_data:
   redis_data:
+
+networks:
+  shared-infrastructure:
+    name: ${DOCKER_SHARED_NETWORK:-ai-infrastructure}
+    external: true

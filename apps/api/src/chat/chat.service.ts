@@ -16,6 +16,7 @@ import {
   InferenceUnavailableError,
 } from '../inference/inference-provider';
 import type { InferenceMessage, InferenceProvider } from '../inference/inference-provider';
+import { CONTEXT_SELECTION_INSTRUCTION, type SuppliedPassage } from './supplied-context.policy';
 
 const messageSchema = z.object({
   role: z.enum(['user', 'assistant']),
@@ -26,6 +27,12 @@ const requestSchema = z.object({
   messages: z.array(messageSchema).min(1).max(100),
 });
 const CHAT_TEMPLATE_TOKEN_RESERVE = 256;
+
+interface ChatCompletion {
+  model: string;
+  content: string;
+  budget: ChatBudget;
+}
 
 export interface ChatBudget {
   promptTokenEstimate: number;
@@ -51,11 +58,7 @@ export class ChatService {
     }
   }
 
-  async complete(input: unknown, requestId: string): Promise<{
-    model: string;
-    content: string;
-    budget: ChatBudget;
-  }> {
+  async complete(input: unknown, requestId: string): Promise<ChatCompletion> {
     const parsed = requestSchema.safeParse(input);
     if (!parsed.success) throw new BadRequestException('Chat request is invalid.');
     const messages = parsed.data.messages;
@@ -64,17 +67,29 @@ export class ChatService {
       throw new BadRequestException('Chat history must alternate user and assistant turns and end with a user message.');
     }
 
+    return this.generate(parsed.data.model, messages, requestId,
+      `The current local date and time is ${new Date().toString()}. Use this value for questions about the current date or time.`);
+  }
+
+  async selectEvidence(input: { model: string; question: string; sources: readonly SuppliedPassage[] }, requestId: string): Promise<ChatCompletion> {
+    // This path intentionally excludes chat history, the clock, retrieval, memory, and tools.
+    return this.generate(input.model, [{ role: 'user', content: JSON.stringify({ question: input.question, sources: input.sources }) }],
+      requestId, CONTEXT_SELECTION_INSTRUCTION,0);
+  }
+
+  private async generate(model: string, messages: readonly InferenceMessage[], requestId: string, instruction: string, temperature?:number): Promise<ChatCompletion> {
+
     let models: readonly string[];
     try {
       models = await this.provider.listModels();
     } catch (error) {
       this.mapProviderError(error);
     }
-    if (!models.includes(parsed.data.model)) throw new BadRequestException('The selected model is not available from the configured provider.');
+    if (!models.includes(model)) throw new BadRequestException('The selected model is not available from the configured provider.');
 
     const systemMessage: InferenceMessage = {
       role: 'system',
-      content: `The current local date and time is ${new Date().toString()}. Use this value for questions about the current date or time.`,
+      content: instruction,
     };
     const inferenceMessages: InferenceMessage[] = [systemMessage, ...messages];
     const promptTokenEstimate = inferenceMessages.reduce(
@@ -95,12 +110,13 @@ export class ChatService {
 
     try {
       const content = await this.provider.complete({
-        model: parsed.data.model,
+        model,
         requestId,
         messages: inferenceMessages,
         maxOutputTokens: reservedOutputTokens,
+        ...(temperature===undefined?{}:{temperature}),
       });
-      return { model: parsed.data.model, content, budget };
+      return { model, content, budget };
     } catch (error) {
       this.mapProviderError(error);
     }
